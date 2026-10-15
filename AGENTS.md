@@ -123,6 +123,11 @@ This document contains the complete system context, Windows VM paths, architectu
   - In **Live / Demo / VPS (`!MQLInfoInteger(MQL_TESTER)`)**: Compares `TimeTradeServer()` (or `TimeCurrent()` when actively ticking within 5 minutes) against `TimeGMT()`, and **rounds to the nearest 15-minute (`900s`) timezone boundary** (`MathRound(diffSeconds / 900.0) * 900`). This is immune to tick lag, weekend freezes, and up to `±7` minutes of local PC/VPS clock drift, while automatically handling US DST shifts and any broker timezone (`UTC+1`, `UTC+2`, `UTC+3`).
   - In **Strategy Tester (`MQLInfoInteger(MQL_TESTER)`)**: Uses `InpBrokerGMTOffsetHours` (`2`) as the backtest fallback.
 
+### Lesson 10: Low-Leverage Prop Firm Margin Trap (`OrderCalcMargin(ORDER_TYPE_BUY_LIMIT)` Returns `$0` on `1:30` Accounts)
+- **Problem**: On Upcomers (`1:30` account leverage + additional symbol margin multiplier on XAUUSD, requiring `~$83,000` margin per `1.00` lot at `$4,500` Gold), passing `ORDER_TYPE_BUY_LIMIT` / `ORDER_TYPE_SELL_LIMIT` to `OrderCalcMargin()` returns **`$0.00` required margin** because `SYMBOL_MARGIN_LIMIT` is `0.0` (pending orders do not consume margin until filled). As a result, `PositionSizer.mqh` did not scale down `1.00+` lot trades to fit inside `$50,000` free margin, causing every market order and triggered limit order to fail with `10019 (not enough money)`.
+- **Solution Implemented in `PositionSizer.mqh` & `ExecutionManager.mqh`**:
+  - Always evaluate margin using the **market deal order type (`ORDER_TYPE_BUY` / `ORDER_TYPE_SELL`)** via **both** `OrderCalcMargin(calcOrderType, ...)` AND `OrderCheck(simReq, simRes)` (`TRADE_ACTION_DEAL`), taking `MathMax(calcMargin, simRes.margin)` and automatically clamping `finalLots` to fit within `85%–88%` of `ACCOUNT_MARGIN_FREE`.
+
 ---
 
 ## 4. One-Block Restore & Retrain Command Reference

@@ -363,6 +363,39 @@ public:
       bool   placed  = false;
       bool   filledImmediately = false;
 
+      // Verify market position margin right before sending (handles 1:30 / low-leverage prop accounts even if price moved)
+      ENUM_ORDER_TYPE dealType = (setup.direction == SIGNAL_LONG) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      double dealRefPrice      = (setup.direction == SIGNAL_LONG) ? MathMax(ask, entryPrice) : MathMax(bid, entryPrice);
+      double freeMarginNow     = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+      double maxSafeMarginNow  = freeMarginNow * 0.88;
+      double minVol            = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN);
+      double volStep           = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_STEP);
+      if(volStep <= 0.0) volStep = 0.01;
+
+      MqlTradeRequest chkReq;
+      MqlTradeCheckResult chkRes;
+      ZeroMemory(chkReq);
+      ZeroMemory(chkRes);
+      chkReq.action    = TRADE_ACTION_DEAL;
+      chkReq.symbol    = m_symbol;
+      chkReq.volume    = lots;
+      chkReq.type      = dealType;
+      chkReq.price     = (setup.direction == SIGNAL_LONG) ? ask : bid;
+      chkReq.deviation = 30;
+      OrderCheck(chkReq, chkRes);
+
+      double reqMarginNow = chkRes.margin;
+      double calcMarginNow = 0.0;
+      if(OrderCalcMargin(dealType, m_symbol, lots, dealRefPrice, calcMarginNow))
+         reqMarginNow = MathMax(reqMarginNow, calcMarginNow);
+
+      if(reqMarginNow > maxSafeMarginNow && lots > minVol && reqMarginNow > 0.0)
+        {
+         double marginPerLotNow = reqMarginNow / lots;
+         double clampedLots     = MathFloor(((maxSafeMarginNow / marginPerLotNow) + QUANT_EPSILON) / volStep) * volStep;
+         lots = NormalizeSymbolLots(m_symbol, MathMax(minVol, clampedLots));
+        }
+
       if(setup.direction == SIGNAL_LONG)
         {
          if(MathAbs(ask - entryPrice) <= 0.85)

@@ -387,19 +387,53 @@ public:
       if(finalLots > maxVol)
          finalLots = maxVol;
 
-      // 7. Verify Free Margin via OrderCalcMargin() & Final P&L via OrderCalcProfit(), scaling down if necessary
-      ENUM_ORDER_TYPE orderType = (direction == SIGNAL_LONG) ? ORDER_TYPE_BUY_LIMIT : ORDER_TYPE_SELL_LIMIT;
-      double marginRequired     = 0.0;
-      double maxSafeMargin      = freeMargin * m_freeMarginSafetyRatio;
+      // 7. Verify Market Position Margin via OrderCalcMargin(ORDER_TYPE_BUY/SELL) + OrderCheck(TRADE_ACTION_DEAL)
+      //    CRITICAL: Never pass ORDER_TYPE_BUY_LIMIT/SELL_LIMIT to OrderCalcMargin because many prop servers
+      //    set SYMBOL_MARGIN_LIMIT = 0.0, causing pending orders or market fills to fail with 10019 (no money)
+      //    on 1:30 / low-leverage Gold accounts (e.g. Upcomers).
+      double curAsk            = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
+      double curBid            = SymbolInfoDouble(m_symbol, SYMBOL_BID);
+      double marginCheckPrice  = (direction == SIGNAL_LONG)
+                                 ? MathMax(entryPrice, (curAsk > 0.0 ? curAsk : entryPrice))
+                                 : MathMax(entryPrice, (curBid > 0.0 ? curBid : entryPrice));
+      double marginRequired    = 0.0;
+      double maxSafeMargin     = freeMargin * m_freeMarginSafetyRatio;
+
+      // Fast O(1) pre-clamp using 1.0-lot market margin from both OrderCalcMargin and OrderCheck
+      double oneLotMarginCalc  = 0.0;
+      OrderCalcMargin(calcOrderType, m_symbol, 1.0, marginCheckPrice, oneLotMarginCalc);
+
+      MqlTradeRequest simReq;
+      MqlTradeCheckResult simRes;
+      ZeroMemory(simReq);
+      ZeroMemory(simRes);
+      simReq.action       = TRADE_ACTION_DEAL;
+      simReq.symbol       = m_symbol;
+      simReq.volume       = 1.0;
+      simReq.type         = calcOrderType;
+      simReq.price        = (direction == SIGNAL_LONG) ? (curAsk > 0.0 ? curAsk : entryPrice) : (curBid > 0.0 ? curBid : entryPrice);
+      simReq.deviation    = 30;
+      OrderCheck(simReq, simRes);
+
+      double oneLotMargin = MathMax(oneLotMarginCalc, simRes.margin);
+      if(oneLotMargin > 0.0 && (finalLots * oneLotMargin) > maxSafeMargin)
+        {
+         double maxAffordableLots = MathFloor(((maxSafeMargin / oneLotMargin) + QUANT_EPSILON) / step) * step;
+         finalLots = MathMin(finalLots, NormalizeDouble(maxAffordableLots, GetVolumeDigits(step)));
+        }
 
       while(finalLots >= minVol)
         {
-         marginRequired = 0.0;
-         if(!OrderCalcMargin(orderType, m_symbol, finalLots, entryPrice, marginRequired))
-           {
-            outResult.diagnosticNote = StringFormat("OrderCalcMargin failed (err=%d)", GetLastError());
-            return false;
-           }
+         double calcMargin = 0.0;
+         OrderCalcMargin(calcOrderType, m_symbol, finalLots, marginCheckPrice, calcMargin);
+
+         ZeroMemory(simRes);
+         simReq.volume = finalLots;
+         OrderCheck(simReq, simRes);
+
+         marginRequired = MathMax(calcMargin, simRes.margin);
+         if(marginRequired <= 0.0 && oneLotMargin > 0.0)
+            marginRequired = finalLots * oneLotMargin;
 
          double verifiedPosPL = 0.0;
          bool   profitCalcOk  = OrderCalcProfit(calcOrderType, m_symbol, finalLots, entryPrice, stopLossPrice, verifiedPosPL);
@@ -409,6 +443,7 @@ public:
 
          if(marginRequired <= maxSafeMargin &&
             (freeMargin - marginRequired) > 0.0 &&
+            simRes.retcode != TRADE_RETCODE_NO_MONEY &&
             (finalLots <= minVol + QUANT_EPSILON || verifiedRisk <= (riskCapitalUSD * 1.01 + QUANT_EPSILON)))
             break;
 
