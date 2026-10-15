@@ -382,9 +382,9 @@ public:
       chkReq.type      = dealType;
       chkReq.price     = (setup.direction == SIGNAL_LONG) ? ask : bid;
       chkReq.deviation = 30;
-      OrderCheck(chkReq, chkRes);
+      bool chkOk       = OrderCheck(chkReq, chkRes);
 
-      double reqMarginNow = chkRes.margin;
+      double reqMarginNow = (chkOk || chkRes.margin > 0.0) ? chkRes.margin : 0.0;
       double calcMarginNow = 0.0;
       if(OrderCalcMargin(dealType, m_symbol, lots, dealRefPrice, calcMarginNow))
          reqMarginNow = MathMax(reqMarginNow, calcMarginNow);

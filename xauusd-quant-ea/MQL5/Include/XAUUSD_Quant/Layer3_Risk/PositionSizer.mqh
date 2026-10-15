@@ -401,7 +401,8 @@ public:
 
       // Fast O(1) pre-clamp using 1.0-lot market margin from both OrderCalcMargin and OrderCheck
       double oneLotMarginCalc  = 0.0;
-      OrderCalcMargin(calcOrderType, m_symbol, 1.0, marginCheckPrice, oneLotMarginCalc);
+      if(!OrderCalcMargin(calcOrderType, m_symbol, 1.0, marginCheckPrice, oneLotMarginCalc))
+         oneLotMarginCalc = 0.0;
 
       MqlTradeRequest simReq;
       MqlTradeCheckResult simRes;
@@ -413,9 +414,9 @@ public:
       simReq.type         = calcOrderType;
       simReq.price        = (direction == SIGNAL_LONG) ? (curAsk > 0.0 ? curAsk : entryPrice) : (curBid > 0.0 ? curBid : entryPrice);
       simReq.deviation    = 30;
-      OrderCheck(simReq, simRes);
+      bool oneLotCheckOk  = OrderCheck(simReq, simRes);
+      double oneLotMargin = MathMax(oneLotMarginCalc, (oneLotCheckOk || simRes.margin > 0.0) ? simRes.margin : 0.0);
 
-      double oneLotMargin = MathMax(oneLotMarginCalc, simRes.margin);
       if(oneLotMargin > 0.0 && (finalLots * oneLotMargin) > maxSafeMargin)
         {
          double maxAffordableLots = MathFloor(((maxSafeMargin / oneLotMargin) + QUANT_EPSILON) / step) * step;
@@ -425,13 +426,14 @@ public:
       while(finalLots >= minVol)
         {
          double calcMargin = 0.0;
-         OrderCalcMargin(calcOrderType, m_symbol, finalLots, marginCheckPrice, calcMargin);
+         if(!OrderCalcMargin(calcOrderType, m_symbol, finalLots, marginCheckPrice, calcMargin))
+            calcMargin = 0.0;
 
          ZeroMemory(simRes);
          simReq.volume = finalLots;
-         OrderCheck(simReq, simRes);
+         bool checkOk  = OrderCheck(simReq, simRes);
 
-         marginRequired = MathMax(calcMargin, simRes.margin);
+         marginRequired = MathMax(calcMargin, (checkOk || simRes.margin > 0.0) ? simRes.margin : 0.0);
          if(marginRequired <= 0.0 && oneLotMargin > 0.0)
             marginRequired = finalLots * oneLotMargin;
 
