@@ -498,6 +498,33 @@ public:
       return (ddUSD / anchor) * 100.0;
      }
 
+   //--- Remaining Total Drawdown Capacity Percentage before internal breaker
+   double             GetRemainingTotalDrawdownCapacityPct() const
+     {
+      double rem = GetTotalBreakerLimitPct() - GetCurrentTotalDrawdownPct();
+      return MathMax(0.0, rem);
+     }
+
+   //--- Check whether any open position or pending order exists for this symbol and magic
+   bool               HasAnyOwnBrokerExposure() const
+     {
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+        {
+         ulong t = PositionGetTicket(i);
+         if(t > 0 && PositionGetString(POSITION_SYMBOL) == m_symbol &&
+            (ulong)PositionGetInteger(POSITION_MAGIC) == m_magic)
+            return true;
+        }
+      for(int i = OrdersTotal() - 1; i >= 0; i--)
+        {
+         ulong t = OrderGetTicket(i);
+         if(t > 0 && OrderGetString(ORDER_SYMBOL) == m_symbol &&
+            (ulong)OrderGetInteger(ORDER_MAGIC) == m_magic)
+            return true;
+        }
+      return false;
+     }
+
    //+------------------------------------------------------------------+
    //| CheckEmergencyBreach                                             |
    //| Top-of-OnTick() Priority Watchdog. Must execute on every tick    |
@@ -512,10 +539,14 @@ public:
       // 2. Update spread telemetry ring buffer
       UpdateSpreadTelemetry();
 
-      // 3. Update Account High-Water Mark
+      // 3. Fast exit if already halted/locked out and all positions/orders are flat
+      if((m_permanentLockout || m_tradingHaltedToday) && !HasAnyOwnBrokerExposure())
+         return true;
+
+      // 4. Update Account High-Water Mark (track realized balance and flat equity peaks)
       double balance = AccountInfoDouble(ACCOUNT_BALANCE);
       double equity  = AccountInfoDouble(ACCOUNT_EQUITY);
-      double peakNow = MathMax(balance, equity);
+      double peakNow = (!HasAnyOwnBrokerExposure()) ? MathMax(balance, equity) : balance;
 
       if(peakNow > m_highWaterMark)
         {
@@ -526,7 +557,7 @@ public:
          SavePersistentState();
         }
 
-      // 4. Maintain Growth Mode Drawdown Dampener state (clamps risk to 0.50% if DD > 3.0% until half recovered)
+      // 5. Maintain Growth Mode Drawdown Dampener state (clamps risk to 0.50% if DD > 3.0% until half recovered)
       double currentTotalDDPct = GetCurrentTotalDrawdownPct();
       if(m_riskMode == MODE_ASYMMETRIC_GROWTH)
         {
@@ -548,7 +579,7 @@ public:
            }
         }
 
-      // 5. Evaluate Hard Daily Drawdown Breaker (2.25% Prop / 2.40% Growth)
+      // 6. Evaluate Hard Daily Drawdown Breaker (2.25% Prop / 2.40% Growth)
       double currentDailyDDPct = GetCurrentDailyDrawdownPct();
       double dailyLimitPct     = GetDailyBreakerLimitPct();
       if(currentDailyDDPct >= dailyLimitPct)
@@ -560,7 +591,7 @@ public:
          return true;
         }
 
-      // 6. Evaluate Hard Max Total Drawdown Breaker (5.20% Prop / 5.40% Growth)
+      // 7. Evaluate Hard Max Total Drawdown Breaker (5.20% Prop / 5.40% Growth)
       double totalLimitPct = GetTotalBreakerLimitPct();
       if(currentTotalDDPct >= totalLimitPct)
         {
@@ -590,9 +621,10 @@ public:
       m_dailyRealizedPnLUSD     += netRealizedPnLUSD;
       m_weeklyRealizedProfitUSD += netRealizedPnLUSD;
 
-      if(netRealizedPnLUSD < -QUANT_EPSILON)
+      double scratchFloorUSD = (m_dayStartReference > 0.0 ? m_dayStartReference * 0.0015 : 5.0);
+      if(netRealizedPnLUSD < -scratchFloorUSD)
          m_consecutiveLossesToday++;
-      else if(netRealizedPnLUSD > QUANT_EPSILON)
+      else if(netRealizedPnLUSD > scratchFloorUSD)
          m_consecutiveLossesToday = 0;
 
       // Update High-Water Mark after realized balance change

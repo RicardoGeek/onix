@@ -286,6 +286,8 @@ def export_trained_model_to_onnx(
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Case 1: Native dict/object containing trained weights + hidden layer parameters
+    if hasattr(model, "to_export_dict") and callable(model.to_export_dict):
+        model = model.to_export_dict()
     if isinstance(model, dict) and "linear_weights" in model:
         onnx_bytes = build_native_onnx_meta_model_bytes(
             linear_weights=model["linear_weights"],

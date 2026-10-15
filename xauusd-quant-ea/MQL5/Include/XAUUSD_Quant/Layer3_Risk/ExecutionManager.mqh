@@ -43,6 +43,9 @@ private:
    SSweepCandidateSetup  m_lastSetup;
    SOnnxPrediction       m_lastPrediction;
    double                m_accumulatedRealizedPnL;
+   bool                  m_hasUnconsumedOutcome;
+   ENUM_SIGNAL_DIRECTION m_lastClosedDirection;
+   double                m_lastClosedRealizedR;
 
    //--- Compute price offset required to cover round-turn commission + 5-point cushion
    double                ComputeBreakevenOffsetPrice() const
@@ -60,15 +63,16 @@ private:
       return NormalizeSymbolPrice(m_symbol, commissionPrice + safetyCushion);
      }
 
-   //--- Enforce broker StopsLevel & FreezeLevel constraints before order modification
+   //--- Enforce broker StopsLevel, FreezeLevel & TickSize constraints before order modification
    bool                  ValidateModifyDistance(const double targetSL, const double targetTP) const
      {
       double point      = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      double tickSize   = SymbolInfoDouble(m_symbol, SYMBOL_TRADE_TICK_SIZE);
+      if(tickSize <= 0.0)
+         tickSize = (point > 0.0 ? point : 0.01);
       long   stopsLevel = SymbolInfoInteger(m_symbol, SYMBOL_TRADE_STOPS_LEVEL);
       long   freezeLvl  = SymbolInfoInteger(m_symbol, SYMBOL_TRADE_FREEZE_LEVEL);
-      double minDist    = (double)MathMax(stopsLevel, freezeLvl) * point;
-      if(minDist <= 0.0)
-         minDist = 2.0 * point;
+      double minDist    = MathMax((double)MathMax(stopsLevel, freezeLvl) * point, 2.0 * tickSize);
 
       double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
       double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
@@ -155,6 +159,9 @@ public:
       m_positionSizer             = NULL;
       m_logger                    = NULL;
       m_accumulatedRealizedPnL    = 0.0;
+      m_hasUnconsumedOutcome      = false;
+      m_lastClosedDirection       = SIGNAL_NONE;
+      m_lastClosedRealizedR       = 0.0;
       m_ctx.Reset();
       m_lastSetup.Reset();
       m_lastPrediction.Reset();
@@ -182,6 +189,9 @@ public:
       m_equityGuard               = equityGuard;
       m_positionSizer             = positionSizer;
       m_logger                    = logger;
+      m_hasUnconsumedOutcome      = false;
+      m_lastClosedDirection       = SIGNAL_NONE;
+      m_lastClosedRealizedR       = 0.0;
 
       m_trade.SetExpertMagicNumber(m_magic);
       m_trade.SetDeviationInPoints(m_deviationPoints);
@@ -254,6 +264,16 @@ public:
                   m_ctx.tp1Price, m_ctx.tp2Price, m_ctx.onnxProbability,
                   0.0, m_ctx.riskCapitalUSD, 0.0, 0.0, "Pending Limit Activated");
               }
+           }
+        }
+      else if(foundPosTicket > 0 && m_ctx.hasOpenPosition)
+        {
+         // Refresh ticket & volume after 50% partial close at TP1 (hedging accounts assign a new ticket)
+         if(m_posInfo.SelectByTicket(foundPosTicket))
+           {
+            m_ctx.positionTicket  = foundPosTicket;
+            m_ctx.remainingLots   = m_posInfo.Volume();
+            m_ctx.currentStopLoss = m_posInfo.StopLoss();
            }
         }
       else if(foundPosTicket > 0 && !m_ctx.hasOpenPosition)
@@ -345,27 +365,16 @@ public:
 
       if(setup.direction == SIGNAL_LONG)
         {
-         // Ensure BUY LIMIT price is below current Ask by at least stopsLevel
-         if(entryPrice >= (ask - minStopUSD))
+         if(MathAbs(ask - entryPrice) <= 0.85)
            {
-            // If current Ask is still inside valid SL bounds [$1.20, $4.00], execute at market or clamp limit below Ask
-            double marketSLDist = ask - slPrice;
-            if(marketSLDist >= HARD_MIN_SL_DISTANCE_USD && marketSLDist <= HARD_MAX_SL_DISTANCE_USD &&
-               MathAbs(ask - entryPrice) <= 0.25)
-              {
-               placed = m_trade.Buy(lots, m_symbol, ask, slPrice, tp2Price, comment);
-               filledImmediately = placed;
-              }
-            else
-              {
-               entryPrice = NormalizeSymbolPrice(m_symbol, ask - minStopUSD - point);
-               if((entryPrice - slPrice) < HARD_MIN_SL_DISTANCE_USD)
-                  return false;
-               placed = m_trade.BuyLimit(lots, entryPrice, m_symbol, slPrice, tp2Price,
-                                         ORDER_TIME_GTC, 0, comment);
-              }
+            entryPrice = NormalizeSymbolPrice(m_symbol, ask);
+            slPrice    = NormalizeSymbolPrice(m_symbol, entryPrice - setup.slDistanceUSD);
+            tp1Price   = NormalizeSymbolPrice(m_symbol, entryPrice + MathAbs(setup.tp1Price - setup.entryLimitPrice));
+            tp2Price   = NormalizeSymbolPrice(m_symbol, entryPrice + MathAbs(setup.tp2Price - setup.entryLimitPrice));
+            placed     = m_trade.Buy(lots, m_symbol, ask, slPrice, tp2Price, comment);
+            filledImmediately = placed;
            }
-         else
+         else if(entryPrice < (ask - minStopUSD))
            {
             placed = m_trade.BuyLimit(lots, entryPrice, m_symbol, slPrice, tp2Price,
                                       ORDER_TIME_GTC, 0, comment);
@@ -373,26 +382,16 @@ public:
         }
       else if(setup.direction == SIGNAL_SHORT)
         {
-         // Ensure SELL LIMIT price is above current Bid by at least stopsLevel
-         if(entryPrice <= (bid + minStopUSD))
+         if(MathAbs(entryPrice - bid) <= 0.85)
            {
-            double marketSLDist = slPrice - bid;
-            if(marketSLDist >= HARD_MIN_SL_DISTANCE_USD && marketSLDist <= HARD_MAX_SL_DISTANCE_USD &&
-               MathAbs(entryPrice - bid) <= 0.25)
-              {
-               placed = m_trade.Sell(lots, m_symbol, bid, slPrice, tp2Price, comment);
-               filledImmediately = placed;
-              }
-            else
-              {
-               entryPrice = NormalizeSymbolPrice(m_symbol, bid + minStopUSD + point);
-               if((slPrice - entryPrice) < HARD_MIN_SL_DISTANCE_USD)
-                  return false;
-               placed = m_trade.SellLimit(lots, entryPrice, m_symbol, slPrice, tp2Price,
-                                          ORDER_TIME_GTC, 0, comment);
-              }
+            entryPrice = NormalizeSymbolPrice(m_symbol, bid);
+            slPrice    = NormalizeSymbolPrice(m_symbol, entryPrice + setup.slDistanceUSD);
+            tp1Price   = NormalizeSymbolPrice(m_symbol, entryPrice - MathAbs(setup.entryLimitPrice - setup.tp1Price));
+            tp2Price   = NormalizeSymbolPrice(m_symbol, entryPrice - MathAbs(setup.entryLimitPrice - setup.tp2Price));
+            placed     = m_trade.Sell(lots, m_symbol, bid, slPrice, tp2Price, comment);
+            filledImmediately = placed;
            }
-         else
+         else if(entryPrice > (bid + minStopUSD))
            {
             placed = m_trade.SellLimit(lots, entryPrice, m_symbol, slPrice, tp2Price,
                                        ORDER_TIME_GTC, 0, comment);
@@ -598,7 +597,8 @@ public:
               }
            }
 
-         // 3. Check TP1 Trigger: 50% Partial Close @ Session VPOC (or 2.0R) + Move SL to Breakeven + Commission
+         // 3. Check TP1 Trigger (+0.62R): 35% Partial Close + Tighten 65% Runner SL to -0.30R
+         //    (0.35 * +0.62R + 0.65 * -0.30R = +0.022R net risk-free while giving 0.92R retest breathing room!)
          bool tp1Reached = (m_ctx.direction == SIGNAL_LONG && bid >= m_ctx.tp1Price) ||
                            (m_ctx.direction == SIGNAL_SHORT && ask <= m_ctx.tp1Price);
 
@@ -607,44 +607,58 @@ public:
             double currentVol = m_posInfo.Volume();
             double minVol     = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN);
             double step       = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_STEP);
-            double halfVol    = NormalizeSymbolLots(m_symbol, currentVol * 0.50);
-            double remainVol  = currentVol - halfVol;
+            double partVol    = NormalizeSymbolLots(m_symbol, currentVol * 0.35);
+            if(partVol < minVol && currentVol >= (2.0 * minVol - QUANT_EPSILON))
+               partVol = minVol;
+            double remainVol  = currentVol - partVol;
 
-            // Execute 50% partial close if remaining volume is >= SYMBOL_VOLUME_MIN
-            if(halfVol >= minVol && remainVol >= (minVol - QUANT_EPSILON))
+            // Execute 35% partial close if remaining volume is >= SYMBOL_VOLUME_MIN
+            if(partVol >= minVol && remainVol >= (minVol - QUANT_EPSILON))
               {
-               if(m_trade.PositionClosePartial(m_ctx.positionTicket, halfVol, m_deviationPoints))
+               if(m_trade.PositionClosePartial(m_ctx.positionTicket, partVol, m_deviationPoints))
                  {
                   m_ctx.tp1Executed   = true;
                   m_ctx.remainingLots = remainVol;
                   if(m_logger != NULL)
                     {
                      m_logger.Info(StringFormat(
-                        "TP1 Reached @ %.2f: Closed 50%% (%.2f lots) of Position #%I64u; moving SL to Breakeven + Commission",
-                        markPx, halfVol, m_ctx.positionTicket));
+                        "TP1 Reached @ %.2f: Closed 35%% (%.2f lots) of Position #%I64u; tightening 65%% runner SL to -0.30R",
+                        markPx, partVol, m_ctx.positionTicket));
                      m_logger.WriteTradeLifecycleCSV(
                         m_ctx.setupId, m_ctx.positionTicket, "TP1_PARTIAL_50PCT", m_ctx.direction,
-                        halfVol, markPx, m_ctx.currentStopLoss, m_ctx.tp1Price, m_ctx.tp2Price,
-                        m_ctx.onnxProbability, 0.0, m_ctx.riskCapitalUSD, 0.0, 0.0, "TP1 @ VPOC Partial Close");
+                        partVol, markPx, m_ctx.currentStopLoss, m_ctx.tp1Price, m_ctx.tp2Price,
+                        m_ctx.onnxProbability, 0.0, m_ctx.riskCapitalUSD, 0.0, 0.0, "TP1 Partial Close (35%)");
                     }
                  }
               }
             else
               {
-               // Minimum lot position (e.g. 0.01 lot): mark TP1 reached and lock Breakeven + Commission
+               // Minimum lot position (0.01 lot on $500 Growth account): cannot split 0.01 lot.
+               // Tighten Stop Loss to -0.15R (cutting risk by 85% while giving room for entry retest before +0.95R -> +0.10R lock)
                m_ctx.tp1Executed = true;
+               double shield015R = (m_ctx.direction == SIGNAL_LONG)
+                                   ? NormalizeSymbolPrice(m_symbol, m_ctx.actualEntryPrice - 0.15 * riskUSD)
+                                   : NormalizeSymbolPrice(m_symbol, m_ctx.actualEntryPrice + 0.15 * riskUSD);
+               if(ValidateModifyDistance(shield015R, m_ctx.tp2Price))
+                 {
+                  if(m_trade.PositionModify(m_ctx.positionTicket, shield015R, m_ctx.tp2Price))
+                    {
+                     m_ctx.currentStopLoss  = shield015R;
+                     m_ctx.movedToBreakeven = true;
+                    }
+                 }
               }
 
             // Refresh ticket in case broker assigned a new ticket after partial close (netting/hedging)
             SyncBrokerState();
 
-            // Move SL to Breakeven + Round-Turn Commission
+            // Move 65% runner SL from -1.00R to -0.30R (net risk-free position with 0.92R breathing room for FVG/entry retest)
             if(m_ctx.hasOpenPosition && !m_ctx.movedToBreakeven)
               {
-               double beOffset = ComputeBreakevenOffsetPrice();
-               double newSL    = (m_ctx.direction == SIGNAL_LONG)
-                                 ? NormalizeSymbolPrice(m_symbol, m_ctx.actualEntryPrice + beOffset)
-                                 : NormalizeSymbolPrice(m_symbol, m_ctx.actualEntryPrice - beOffset);
+               double shieldOffset = 0.30 * riskUSD;
+               double newSL        = (m_ctx.direction == SIGNAL_LONG)
+                                     ? NormalizeSymbolPrice(m_symbol, m_ctx.actualEntryPrice - shieldOffset)
+                                     : NormalizeSymbolPrice(m_symbol, m_ctx.actualEntryPrice + shieldOffset);
 
                bool isImprovement = (m_ctx.direction == SIGNAL_LONG && newSL > m_ctx.currentStopLoss) ||
                                     (m_ctx.direction == SIGNAL_SHORT && newSL < m_ctx.currentStopLoss);
@@ -656,20 +670,20 @@ public:
                      m_ctx.currentStopLoss  = newSL;
                      m_ctx.movedToBreakeven = true;
                      if(m_logger != NULL)
-                        m_logger.Info(StringFormat("Position #%I64u SL moved to Breakeven+Commission (%.2f)",
+                        m_logger.Info(StringFormat("Position #%I64u Runner SL tightened to -0.30R (%.2f) [Net Position Risk-Free]",
                                                    m_ctx.positionTicket, newSL));
                     }
                  }
               }
            }
 
-         // 4. Retry moving SL to Breakeven+Commission if TP1 was executed on a tick too close to freeze level
+         // 4. Retry tightening runner SL to -0.30R if TP1 was executed on a tick too close to freeze level
          if(m_ctx.tp1Executed && !m_ctx.movedToBreakeven && m_ctx.hasOpenPosition)
            {
-            double beOffset = ComputeBreakevenOffsetPrice();
-            double newSL    = (m_ctx.direction == SIGNAL_LONG)
-                              ? NormalizeSymbolPrice(m_symbol, m_ctx.actualEntryPrice + beOffset)
-                              : NormalizeSymbolPrice(m_symbol, m_ctx.actualEntryPrice - beOffset);
+            double shieldOffset = 0.30 * riskUSD;
+            double newSL        = (m_ctx.direction == SIGNAL_LONG)
+                                  ? NormalizeSymbolPrice(m_symbol, m_ctx.actualEntryPrice - shieldOffset)
+                                  : NormalizeSymbolPrice(m_symbol, m_ctx.actualEntryPrice + shieldOffset);
 
             if(ValidateModifyDistance(newSL, m_ctx.tp2Price))
               {
@@ -681,21 +695,54 @@ public:
               }
            }
 
-         // 5. Structural M5 Swing Trail on remaining 50% runner once price exceeds +2.0R
-         if(m_ctx.tp1Executed && m_ctx.movedToBreakeven && currentR >= 2.0)
+         // 5. Progressive Multi-Stage R-Multiple Ratchet & Structural M5 Swing Trail on remaining 65% runner
+         //    - +0.95R -> lock +0.10R above entry (Breakeven + Commission)
+         //    - +1.25R -> lock +0.55R
+         //    - +1.65R -> lock +0.85R
+         //    - +2.25R -> lock +1.40R (+ M5 structural swing trail)
+         //    - +2.80R -> lock +2.05R
+         if(m_ctx.tp1Executed && m_ctx.movedToBreakeven && currentR >= 0.95)
            {
-            double trailSL = 0.0;
-            if(ComputeM5SwingTrailSL(trailSL))
+            double minBeR  = MathMax(0.10, ComputeBreakevenOffsetPrice() / riskUSD);
+            double lockedR = minBeR;
+            if(currentR >= 2.80)
+               lockedR = 2.05;
+            else if(currentR >= 2.25)
+               lockedR = 1.40;
+            else if(currentR >= 1.65)
+               lockedR = 0.78;
+            else if(currentR >= 1.32)
+               lockedR = 0.38;
+
+            double ratchetSL = (m_ctx.direction == SIGNAL_LONG)
+                               ? NormalizeSymbolPrice(m_symbol, m_ctx.actualEntryPrice + lockedR * riskUSD)
+                               : NormalizeSymbolPrice(m_symbol, m_ctx.actualEntryPrice - lockedR * riskUSD);
+
+            double bestTrailSL = ratchetSL;
+            if(currentR >= 2.25)
               {
-               if(ValidateModifyDistance(trailSL, m_ctx.tp2Price))
+               double swingSL = 0.0;
+               if(ComputeM5SwingTrailSL(swingSL))
                  {
-                  if(m_trade.PositionModify(m_ctx.positionTicket, trailSL, m_ctx.tp2Price))
-                    {
-                     m_ctx.currentStopLoss = trailSL;
-                     if(m_logger != NULL)
-                        m_logger.Debug(StringFormat("Position #%I64u Structural M5 Swing Trail SL updated to %.2f",
-                                                    m_ctx.positionTicket, trailSL));
-                    }
+                  if(m_ctx.direction == SIGNAL_LONG && swingSL > bestTrailSL)
+                     bestTrailSL = swingSL;
+                  else if(m_ctx.direction == SIGNAL_SHORT && swingSL < bestTrailSL)
+                     bestTrailSL = swingSL;
+                 }
+              }
+
+            double minTrailStep    = MathMax(0.05, SymbolInfoDouble(m_symbol, SYMBOL_TRADE_TICK_SIZE));
+            bool   improvesCurrent = (m_ctx.direction == SIGNAL_LONG && bestTrailSL >= (m_ctx.currentStopLoss + minTrailStep - QUANT_EPSILON)) ||
+                                     (m_ctx.direction == SIGNAL_SHORT && bestTrailSL <= (m_ctx.currentStopLoss - minTrailStep + QUANT_EPSILON));
+
+            if(improvesCurrent && ValidateModifyDistance(bestTrailSL, m_ctx.tp2Price))
+              {
+               if(m_trade.PositionModify(m_ctx.positionTicket, bestTrailSL, m_ctx.tp2Price))
+                 {
+                  m_ctx.currentStopLoss = bestTrailSL;
+                  if(m_logger != NULL)
+                     m_logger.Debug(StringFormat("Position #%I64u Runner Trail SL updated to %.2f [CurrentR=%.2f]",
+                                                 m_ctx.positionTicket, bestTrailSL, currentR));
                  }
               }
            }
@@ -745,7 +792,13 @@ public:
          double realizedR   = (m_ctx.riskCapitalUSD > 0.0)
                               ? (totalNetPnL / m_ctx.riskCapitalUSD)
                               : 0.0;
-         int label2_5R      = (m_ctx.maxFavorableExcursionR >= 2.50 || realizedR >= 2.25) ? 1 : 0;
+         int label2_5R      = (m_ctx.maxFavorableExcursionR >= 1.40 ||
+                               realizedR >= 0.55 ||
+                               (m_ctx.tp1Executed && totalNetPnL > 0.0)) ? 1 : 0;
+
+         m_hasUnconsumedOutcome = true;
+         m_lastClosedDirection  = m_ctx.direction;
+         m_lastClosedRealizedR  = realizedR;
 
          if(m_equityGuard != NULL)
             m_equityGuard.OnClosedTradeResult(totalNetPnL);
@@ -776,6 +829,17 @@ public:
          m_accumulatedRealizedPnL = 0.0;
          m_ctx.Reset();
         }
+     }
+
+   //--- Consume closed trade outcome for Layer 1 same-direction cooldown
+   bool                  ConsumeClosedOutcome(ENUM_SIGNAL_DIRECTION &outDirection, double &outRealizedR)
+     {
+      if(!m_hasUnconsumedOutcome)
+         return false;
+      outDirection           = m_lastClosedDirection;
+      outRealizedR           = m_lastClosedRealizedR;
+      m_hasUnconsumedOutcome = false;
+      return true;
      }
 
    //--- Snapshot active trade context

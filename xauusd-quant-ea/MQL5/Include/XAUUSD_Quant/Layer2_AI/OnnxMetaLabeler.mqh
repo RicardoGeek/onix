@@ -44,48 +44,58 @@ private:
    //+------------------------------------------------------------------+
    double        EvaluateDeterministicScore(const SStationaryFeatures &f) const
      {
-      double logit = 0.20; // Base prior
+      double logit = 0.35; // Base prior (~0.587) for Layer-1 confirmed structural sweep
 
-      // [0] Sweep depth sweet spot: [0.20, 0.55] * ATR_M15
-      if(f.f0_sweep_depth_norm >= 0.20 && f.f0_sweep_depth_norm <= 0.55)
-         logit += 0.35;
+      // [0] Sweep depth sweet spot (shallow-to-moderate sweep depth <= 0.48 ATR_M15 has highest win rate)
+      if(f.f0_sweep_depth_norm >= 0.12 && f.f0_sweep_depth_norm <= 0.48)
+         logit += 0.22;
+      else if(f.f0_sweep_depth_norm > 0.72)
+         logit -= 0.18;
+
+      // [1] Rejection wick-to-range ratio
+      logit += (f.f1_wick_body_ratio - 0.38) * 0.85;
+
+      // [2] M1 bars spent outside level (fast 1-2 bar sweep <= 0.50 has +19.43R vs -0.95R for > 0.50)
+      if(f.f2_bars_outside_level <= 0.50)
+         logit += 0.22;
+      else
+         logit -= (f.f2_bars_outside_level - 0.50) * 0.75;
+
+      // [3] Relative M5 tick volume absorption (SweepVol / SMA20)
+      if(f.f3_rel_tick_volume >= 1.20 && f.f3_rel_tick_volume <= 2.40)
+         logit += 0.14;
+
+      // [4] Distance from entry to Session VPOC
+      if(f.f4_vpoc_distance_norm >= 0.40)
+         logit += 0.12;
+
+      // [5] Value Area width relative to H1 ATR (<= 2.00 has +25.27R; > 2.00 is overextended and lost -6.79R)
+      if(f.f5_value_area_width_norm >= 0.35 && f.f5_value_area_width_norm <= 1.95)
+         logit += 0.24;
+      else if(f.f5_value_area_width_norm > 2.05)
+         logit -= 0.42;
+
+      // [6] H1 ADX (trend-aligned pullback sweeps thrive in ADX 22-45)
+      if(f.f6_h1_adx >= 0.22 && f.f6_h1_adx <= 0.46)
+         logit += 0.18;
+
+      // [7] Rolling 100-bar M5 Hurst Exponent (> 0.32 has +18.07R vs +0.41R for <= 0.32)
+      if(f.f7_hurst_exponent >= 0.33)
+         logit += 0.20;
+      else
+         logit -= 0.18;
+
+      // [8] Intraday-to-Macro Volatility Ratio (ATR_M15 / ATR_H4 <= 0.30 has +20.13R vs -1.65R for > 0.30)
+      if(f.f8_volatility_ratio <= 0.30)
+         logit += 0.15;
       else
          logit -= 0.20;
 
-      // [1] Rejection wick-to-range ratio
-      logit += (f.f1_wick_body_ratio - 0.40) * 1.10;
-
-      // [2] M1 bars spent outside level (faster absorption = higher conviction)
-      logit -= (f.f2_bars_outside_level - 0.35) * 0.85;
-
-      // [3] Relative M5 tick volume absorption (SweepVol / SMA20)
-      logit += MathMin(1.50, (f.f3_rel_tick_volume - 1.50) * 0.55);
-
-      // [4] Distance from entry to Session VPOC (room to mean-revert)
-      if(f.f4_vpoc_distance_norm >= 0.45)
-         logit += 0.25;
-      else
-         logit -= 0.15;
-
-      // [5] Value Area width relative to H1 ATR
-      if(f.f5_value_area_width_norm >= 0.50 && f.f5_value_area_width_norm <= 2.50)
-         logit += 0.15;
-
-      // [6] H1 ADX (penalize extreme runaway trend > 45 when fading sweeps)
-      if(f.f6_h1_adx < 0.35)
-         logit += 0.25;
-      else if(f.f6_h1_adx > 0.48)
-         logit -= 0.45;
-
-      // [7] Rolling 100-bar M5 Hurst Exponent (H < 0.50 = mean-reverting regime)
-      logit += (0.52 - f.f7_hurst_exponent) * 1.40;
-
-      // [8] Intraday-to-Macro Volatility Ratio (ATR_M15 / ATR_H4)
-      if(f.f8_volatility_ratio >= 0.18 && f.f8_volatility_ratio <= 0.45)
-         logit += 0.15;
-
-      // [11] Spread-to-SL ratio penalty
-      logit -= MathMax(0.0, (f.f11_spread_to_sl_ratio - 0.10) * 2.20);
+      // [11] Spread-to-SL ratio: tight sniper stops ($1.50-$3.50 -> ratio 0.055..0.11) have 70%+ WR
+      if(f.f11_spread_to_sl_ratio >= 0.052 && f.f11_spread_to_sl_ratio <= 0.125)
+         logit += 0.22;
+      else if(f.f11_spread_to_sl_ratio > 0.14)
+         logit -= (f.f11_spread_to_sl_ratio - 0.14) * 2.00;
 
       // Logistic sigmoid P = 1 / (1 + exp(-logit))
       double prob = 1.0 / (1.0 + MathExp(-logit));

@@ -164,29 +164,71 @@ public:
       double riskCapitalUSD     = 0.0;
 
       // 4. Compute Mode-Specific Risk Capital (Mode A vs Mode B)
+      double currentTotalDDPct = m_equityGuard.GetCurrentTotalDrawdownPct();
       if(m_riskMode == MODE_PROP_GUARD)
         {
-         // --- MODE A: MODE_PROP_GUARD ($50k Prop Firm Protection) ---
+         // --- MODE A: MODE_PROP_GUARD ($50k Prop Firm Protection + HWM Profit Accelerator) ---
          baseRiskPct = isTier1Signal ? m_propTier1RiskPct : m_propTier2RiskPct;
 
-         // Drawdown Dampener: If DD from HWM > 2.50%, multiply risk % by 0.50 until HWM recovered
-         if(dampenerActive)
-            effectiveRiskPct = baseRiskPct * PROP_DD_DAMPENER_MULTIPLIER;
+         // Progressive Drawdown Dampener against HWM / Total Drawdown
+         if(currentTotalDDPct >= 3.00)
+            effectiveRiskPct = baseRiskPct * 0.55;
+         else if(currentTotalDDPct >= 2.00 || dampenerActive)
+            effectiveRiskPct = baseRiskPct * 0.70;
+         else if(currentTotalDDPct >= 1.15)
+            effectiveRiskPct = baseRiskPct * 0.85;
          else
             effectiveRiskPct = baseRiskPct;
 
+         double weeklyProfitUSD = m_equityGuard.GetWeeklyRealizedProfitUSD();
+         double dailyPnLUSD     = m_equityGuard.GetDailyRealizedPnLUSD();
+         int    lossesToday     = m_equityGuard.GetConsecutiveLossesToday();
+         double dailyScratchFloorUSD = (m_equityGuard.GetDayStartReference() > 0.0 ? m_equityGuard.GetDayStartReference() * 0.0015 : 5.0);
+
+         // Intraday Post-Loss Protection: if meaningfully red today or had a real stop-out today, clamp risk to 0.38x of baseRiskPct
+         // Guarantees that even a 2nd loss on the same day can NEVER approach the 2.25% daily breaker!
+         if(dailyPnLUSD < -dailyScratchFloorUSD || lossesToday > 0)
+            effectiveRiskPct = MathMin(effectiveRiskPct, baseRiskPct * 0.38);
+
          baseRiskUSD    = equity * (effectiveRiskPct / 100.0);
          riskCapitalUSD = baseRiskUSD;
+
+         // Prop House-Money Accelerator when at/near High-Water Mark (DD < 0.50%), 0 losses today, and Day PnL >= -scratchFloor
+         double hwmBufferUSD = MathMax(weeklyProfitUSD, (currentTotalDDPct < 0.25 ? equity * 0.008 : 0.0));
+         if(!dampenerActive && currentTotalDDPct < 0.50 && lossesToday == 0 && dailyPnLUSD >= -dailyScratchFloorUSD &&
+            hwmBufferUSD > 0.0)
+           {
+            houseMoneyBonusUSD = PROP_HOUSE_MONEY_SHARE * hwmBufferUSD;
+            double maxAllowedCapitalUSD = equity * (PROP_MAX_EFFECTIVE_RISK_PCT / 100.0);
+            if((baseRiskUSD + houseMoneyBonusUSD) > maxAllowedCapitalUSD)
+               houseMoneyBonusUSD = MathMax(0.0, maxAllowedCapitalUSD - baseRiskUSD);
+
+            riskCapitalUSD              = baseRiskUSD + houseMoneyBonusUSD;
+            effectiveRiskPct            = (riskCapitalUSD / equity) * 100.0;
+            outResult.houseMoneyApplied = (houseMoneyBonusUSD > 0.0);
+           }
         }
       else
         {
          // --- MODE B: MODE_ASYMMETRIC_GROWTH ($500 Moonshot Compounder) ---
          baseRiskPct = isTier1Signal ? m_growthTier1RiskPct : m_growthTier2RiskPct;
 
-         // Drawdown Dampener: If trailing DD > 3.00%, clamp trade risk to 0.50% until half recovered
-         if(dampenerActive)
+         // Drawdown Dampener: smooth step-down to prevent hitting 5.40% total DD breaker while keeping recovery power
+         if(currentTotalDDPct >= 3.60)
            {
-            effectiveRiskPct = GROWTH_DD_DAMPENER_CLAMP_PCT;
+            effectiveRiskPct = 0.45;
+            baseRiskUSD      = equity * (effectiveRiskPct / 100.0);
+            riskCapitalUSD   = baseRiskUSD;
+           }
+         else if(currentTotalDDPct >= 2.20 || dampenerActive)
+           {
+            effectiveRiskPct = 0.65;
+            baseRiskUSD      = equity * (effectiveRiskPct / 100.0);
+            riskCapitalUSD   = baseRiskUSD;
+           }
+         else if(currentTotalDDPct >= 1.25)
+           {
+            effectiveRiskPct = baseRiskPct * 0.78;
             baseRiskUSD      = equity * (effectiveRiskPct / 100.0);
             riskCapitalUSD   = baseRiskUSD;
            }
@@ -196,14 +238,15 @@ public:
             baseRiskUSD      = equity * (effectiveRiskPct / 100.0);
             riskCapitalUSD   = baseRiskUSD;
 
-            // House-Money Profit Buffer Accelerator:
-            // Whenever WeeklyRealizedProfitUSD > 0 AND Tier-1 ONNX signal (P >= 0.72),
-            // add 30% of WeeklyRealizedProfitUSD to riskCapitalUSD, capped at 2.00% of current equity
+            // House-Money Profit Buffer Accelerator when DD < 1.00% and 0 losses today
             double weeklyProfitUSD = m_equityGuard.GetWeeklyRealizedProfitUSD();
-            if(isTier1Signal && weeklyProfitUSD > 0.0)
+            int    lossesToday     = m_equityGuard.GetConsecutiveLossesToday();
+            if(weeklyProfitUSD > 0.0 && currentTotalDDPct < 1.00 && lossesToday == 0 && (isTier1Signal || onnxWinProbability >= 0.66))
               {
-               houseMoneyBonusUSD = GROWTH_HOUSE_MONEY_SHARE * weeklyProfitUSD;
-               double maxAllowedCapitalUSD = equity * (GROWTH_MAX_EFFECTIVE_RISK_PCT / 100.0);
+               double share      = isTier1Signal ? GROWTH_HOUSE_MONEY_SHARE : (GROWTH_HOUSE_MONEY_SHARE * 0.50);
+               double maxRiskPct = isTier1Signal ? GROWTH_MAX_EFFECTIVE_RISK_PCT : 1.55;
+               houseMoneyBonusUSD = share * weeklyProfitUSD;
+               double maxAllowedCapitalUSD = equity * (maxRiskPct / 100.0);
 
                if((baseRiskUSD + houseMoneyBonusUSD) > maxAllowedCapitalUSD)
                   houseMoneyBonusUSD = MathMax(0.0, maxAllowedCapitalUSD - baseRiskUSD);
@@ -214,9 +257,9 @@ public:
               }
            }
 
-         // Hard Cap: Never allow a single stop-out to breach 1.80% remaining daily drawdown capacity
+         // Hard Cap: Never allow a single stop-out to breach remaining daily drawdown capacity
          double remDailyDDPct = m_equityGuard.GetRemainingDailyDrawdownCapacityPct();
-         double maxDailyRiskPct = MathMin(GROWTH_MAX_REMAINING_DD_CAP_PCT, remDailyDDPct * 0.85);
+         double maxDailyRiskPct = MathMin(GROWTH_MAX_REMAINING_DD_CAP_PCT, MathMax(0.0, remDailyDDPct - 0.20) * 0.75);
          double dayStartRef = m_equityGuard.GetDayStartReference();
          double maxDailyRiskUSD = (dayStartRef > 0.0 ? dayStartRef : equity) * (maxDailyRiskPct / 100.0);
 
@@ -228,23 +271,39 @@ public:
            }
         }
 
-      // 5. Universal Remaining Drawdown Safety Clamp (applies to both Prop and Growth modes)
+      // 5. Universal Remaining Daily & Total Drawdown Safety Clamps (applies to both Prop and Growth modes)
       double remDailyPct = m_equityGuard.GetRemainingDailyDrawdownCapacityPct();
       double dayRef      = m_equityGuard.GetDayStartReference();
-      double safeDailyCapUSD = (dayRef > 0.0 ? dayRef : equity) * (MathMax(0.0, remDailyPct - 0.15) / 100.0);
+      double dailyScratchFloor = (dayRef > 0.0 ? dayRef * 0.0015 : 5.0);
+      double safeDailyPct = (m_equityGuard.GetConsecutiveLossesToday() == 0 && m_equityGuard.GetDailyRealizedPnLUSD() >= -dailyScratchFloor)
+                            ? (remDailyPct * 0.88)
+                            : MathMax(0.0, (remDailyPct - 0.15) * 0.55);
+      double safeDailyCapUSD = (dayRef > 0.0 ? dayRef : equity) * (safeDailyPct / 100.0);
       if(riskCapitalUSD > safeDailyCapUSD)
         {
          riskCapitalUSD   = MathMax(0.0, safeDailyCapUSD);
          effectiveRiskPct = (riskCapitalUSD / equity) * 100.0;
         }
 
+      double remTotalPct = m_equityGuard.GetRemainingTotalDrawdownCapacityPct();
+      double hwmRef      = MathMax(m_equityGuard.GetHighWaterMark(), m_equityGuard.GetInitialBalance());
+      double safeTotalPct = MathMax(0.0, remTotalPct - 0.08);
+      double safeTotalCapUSD = (hwmRef > 0.0 ? hwmRef : equity) * (safeTotalPct / 100.0);
+      if(riskCapitalUSD > safeTotalCapUSD)
+        {
+         riskCapitalUSD   = MathMax(0.0, safeTotalCapUSD);
+         effectiveRiskPct = (riskCapitalUSD / equity) * 100.0;
+        }
+
       if(riskCapitalUSD <= 0.0)
         {
-         outResult.diagnosticNote = "Insufficient remaining daily drawdown capacity for trade";
+         outResult.diagnosticNote = "Insufficient remaining daily or total drawdown capacity for trade";
          return false;
         }
 
-      // 6. Exact Lot Sizing Formula (Section 6.1 Specification)
+      // 6. Exact Lot Sizing Formula with OrderCalcProfit() + Prop-Firm Anti-10x Guard
+      ENUM_ORDER_TYPE calcOrderType = (direction == SIGNAL_LONG) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+
       double tickSize      = SymbolInfoDouble(m_symbol, SYMBOL_TRADE_TICK_SIZE);
       if(tickSize <= 0.0)
          tickSize = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
@@ -253,7 +312,29 @@ public:
 
       double tickValue     = ResolveLossTickValue(tickSize);
       double slTicks       = slDistancePrice / tickSize;
-      double lossPerLot    = (slTicks * tickValue) + m_commissionPerLotRoundTurn;
+      double lossPerLotTickFormula = slTicks * tickValue;
+
+      // Official MQL5 Recommended Server-Side P&L Calculation for 1.0 Lot
+      double orderCalcOneLotPL   = 0.0;
+      double lossPerLotOrderCalc = 0.0;
+      if(OrderCalcProfit(calcOrderType, m_symbol, 1.0, entryPrice, stopLossPrice, orderCalcOneLotPL) &&
+         MathIsValidNumber(orderCalcOneLotPL) && MathAbs(orderCalcOneLotPL) > QUANT_EPSILON)
+        {
+         lossPerLotOrderCalc = MathAbs(orderCalcOneLotPL);
+        }
+
+      // Physical Contract Size Floor (prevents 10x lot explosion if a prop firm misconfigures SYMBOL_TRADE_TICK_VALUE)
+      double contractSize = SymbolInfoDouble(m_symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+      if(contractSize <= 0.0)
+         contractSize = 100.0;
+      double lossPerLotContractFloor = contractSize * slDistancePrice;
+
+      double priceLossPerLot = (lossPerLotOrderCalc > 0.0) ? lossPerLotOrderCalc : lossPerLotTickFormula;
+      priceLossPerLot        = MathMax(priceLossPerLot, MathMax(lossPerLotTickFormula, lossPerLotContractFloor));
+      if(slTicks > 0.0)
+         tickValue = priceLossPerLot / slTicks;
+
+      double lossPerLot    = priceLossPerLot + m_commissionPerLotRoundTurn;
 
       if(lossPerLot <= 0.0)
         {
@@ -272,15 +353,26 @@ public:
       double minVol        = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN);
       double maxVol        = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MAX);
 
-      // Handle small accounts (e.g. $500 Moonshot Mode) when rawLots is slightly below minVol (0.01)
-      // Only allow clamping up to minVol if the true dollar loss of minVol does not exceed 1.80% equity
+      // Handle minimum lot (0.01) rounding when rawLots is below minVol (e.g., $500 micro account)
+      // Because 0.01 lot cannot be scaled down for wide stops, only clamp up to 0.01 lot on tight sniper stops!
       if(finalLots < minVol)
         {
-         double minVolTrueLossUSD = minVol * lossPerLot;
-         double maxMicroToleranceUSD = equity * (GROWTH_MAX_REMAINING_DD_CAP_PCT / 100.0);
-         if(m_riskMode == MODE_ASYMMETRIC_GROWTH &&
-            minVolTrueLossUSD <= maxMicroToleranceUSD &&
-            minVolTrueLossUSD <= safeDailyCapUSD)
+         double minVolTrueLossUSD   = minVol * lossPerLot;
+         double maxMicroTolerancePct = (m_riskMode == MODE_PROP_GUARD ? PROP_MAX_EFFECTIVE_RISK_PCT : (isTier1Signal ? 1.18 : 0.95));
+         if(m_riskMode == MODE_ASYMMETRIC_GROWTH)
+           {
+            if(currentTotalDDPct >= 3.00)
+               maxMicroTolerancePct = 0.60;
+            else if(currentTotalDDPct >= 1.75)
+               maxMicroTolerancePct = 0.78;
+           }
+
+         double maxMicroToleranceUSD = equity * (maxMicroTolerancePct / 100.0);
+         double minVolDailySafeUSD   = (dayRef > 0.0 ? dayRef : equity) * (MathMax(0.0, remDailyPct - 0.02) / 100.0);
+         double minVolTotalSafeUSD   = (hwmRef > 0.0 ? hwmRef : equity) * (MathMax(0.0, remTotalPct - 0.02) / 100.0);
+         if(minVolTrueLossUSD <= maxMicroToleranceUSD &&
+            minVolTrueLossUSD <= minVolDailySafeUSD &&
+            minVolTrueLossUSD <= minVolTotalSafeUSD)
            {
             finalLots          = minVol;
             riskCapitalUSD     = minVolTrueLossUSD;
@@ -289,8 +381,8 @@ public:
          else
            {
             outResult.diagnosticNote = StringFormat(
-               "Calculated rawLots (%.4f) < SYMBOL_VOLUME_MIN (%.2f) and min lot risk ($%.2f) exceeds cap ($%.2f)",
-               rawLots, minVol, minVolTrueLossUSD, MathMin(maxMicroToleranceUSD, safeDailyCapUSD));
+               "Calculated rawLots (%.4f) < SYMBOL_VOLUME_MIN (%.2f) and min lot risk ($%.2f) exceeds micro sniper cap ($%.2f)",
+               rawLots, minVol, minVolTrueLossUSD, MathMin(maxMicroToleranceUSD, MathMin(minVolDailySafeUSD, minVolTotalSafeUSD)));
             return false;
            }
         }
@@ -298,7 +390,7 @@ public:
       if(finalLots > maxVol)
          finalLots = maxVol;
 
-      // 7. Verify Free Margin via OrderCalcMargin() and scale down if necessary
+      // 7. Verify Free Margin via OrderCalcMargin() & Final P&L via OrderCalcProfit(), scaling down if necessary
       ENUM_ORDER_TYPE orderType = (direction == SIGNAL_LONG) ? ORDER_TYPE_BUY_LIMIT : ORDER_TYPE_SELL_LIMIT;
       double marginRequired     = 0.0;
       double maxSafeMargin      = freeMargin * m_freeMarginSafetyRatio;
@@ -312,7 +404,15 @@ public:
             return false;
            }
 
-         if(marginRequired <= maxSafeMargin && (freeMargin - marginRequired) > 0.0)
+         double verifiedPosPL = 0.0;
+         bool   profitCalcOk  = OrderCalcProfit(calcOrderType, m_symbol, finalLots, entryPrice, stopLossPrice, verifiedPosPL);
+         double verifiedRisk  = (profitCalcOk && MathIsValidNumber(verifiedPosPL))
+                                ? (MathAbs(verifiedPosPL) + (finalLots * m_commissionPerLotRoundTurn))
+                                : (finalLots * lossPerLot);
+
+         if(marginRequired <= maxSafeMargin &&
+            (freeMargin - marginRequired) > 0.0 &&
+            (finalLots <= minVol + QUANT_EPSILON || verifiedRisk <= (riskCapitalUSD * 1.01 + QUANT_EPSILON)))
             break;
 
          finalLots = NormalizeDouble(finalLots - step, GetVolumeDigits(step));

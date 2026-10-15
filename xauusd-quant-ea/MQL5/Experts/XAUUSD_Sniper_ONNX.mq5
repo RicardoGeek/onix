@@ -32,10 +32,10 @@ input group "=== [1] LAYER 3: RISK MODE & DRAWDOWN PROTECTION ==="
 input ENUM_RISK_MODE InpRiskMode                  = MODE_PROP_GUARD;    // Operating Risk Mode ($50k Prop vs $500 Growth)
 input ENUM_DD_TYPE   InpDrawdownType              = DD_TRAILING_HWM;    // Max Drawdown Reference (Trailing HWM vs Static)
 input double         InpCommissionPerLotRoundTurn = 7.00;               // Round-Turn ECN Commission per Lot (USD)
-input double         InpPropTier2RiskPct          = 0.50;               // Prop Mode Tier-2 Risk % (0.58 <= P < 0.72)
-input double         InpPropTier1RiskPct          = 0.85;               // Prop Mode Tier-1 Risk % (P >= 0.72)
-input double         InpGrowthTier2RiskPct        = 0.80;               // Growth Mode Tier-2 Base Risk % (0.58 <= P < 0.72)
-input double         InpGrowthTier1RiskPct        = 1.10;               // Growth Mode Tier-1 Base Risk % (P >= 0.72)
+input double         InpPropTier2RiskPct          = 1.05;               // Prop Mode Tier-2 Risk % (0.58 <= P < 0.72)
+input double         InpPropTier1RiskPct          = 1.88;               // Prop Mode Tier-1 Risk % (P >= 0.72)
+input double         InpGrowthTier2RiskPct        = 1.00;               // Growth Mode Tier-2 Base Risk % (0.58 <= P < 0.72)
+input double         InpGrowthTier1RiskPct        = 1.65;               // Growth Mode Tier-1 Base Risk % (P >= 0.72)
 
 input group "=== [2] LAYER 2: NATIVE ONNX META-LABELER ==="
 input bool           InpUseOnnxModel              = true;               // Enable Native ONNX Model (false = Deterministic / Data Export)
@@ -86,7 +86,7 @@ datetime           g_lastHudUpdateTime = 0;
 //+------------------------------------------------------------------+
 void UpdateChartHUD()
   {
-   if(!InpShowChartHUD || (bool)MQLInfoInteger(MQL_TESTER) && (bool)MQLInfoInteger(MQL_OPTIMIZATION))
+   if(!InpShowChartHUD || ((bool)MQLInfoInteger(MQL_TESTER) && (bool)MQLInfoInteger(MQL_OPTIMIZATION)))
       return;
 
    datetime now = TimeCurrent();
@@ -434,6 +434,11 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeResult &result)
   {
    g_executionManager.OnTradeTransaction(trans, request, result);
+
+   ENUM_SIGNAL_DIRECTION closedDir = SIGNAL_NONE;
+   double closedR = 0.0;
+   if(g_executionManager.ConsumeClosedOutcome(closedDir, closedR))
+      g_sweepEngine.NotifyTradeOutcome(closedDir, closedR, ResolveCurrentUTCTime(InpBrokerGMTOffsetHours));
   }
 
 //+------------------------------------------------------------------+

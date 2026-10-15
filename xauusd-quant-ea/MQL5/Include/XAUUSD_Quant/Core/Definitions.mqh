@@ -32,9 +32,9 @@
 #define PROP_TOTAL_DD_BREAKER_PCT        5.20
 #define GROWTH_TOTAL_DD_BREAKER_PCT      5.40
 
-//--- Sniper Stop-Loss Guardrails (in USD on XAUUSD)
+//--- Sniper Stop-Loss Guardrails (in USD on XAUUSD, dynamically lot-scaled by PositionSizer)
 #define HARD_MIN_SL_DISTANCE_USD         1.20
-#define HARD_MAX_SL_DISTANCE_USD         4.00
+#define HARD_MAX_SL_DISTANCE_USD         10.50
 #define IDEAL_MIN_SL_DISTANCE_USD        1.50
 #define IDEAL_MAX_SL_DISTANCE_USD        3.50
 
@@ -43,21 +43,23 @@
 #define ONNX_PROB_TIER1_MIN              0.72
 
 //--- Mode A (Prop Guard) Risk Parameters
-#define PROP_TIER2_RISK_PCT              0.50
-#define PROP_TIER1_RISK_PCT              0.85
-#define PROP_DD_DAMPENER_TRIGGER_PCT     2.50
-#define PROP_DD_DAMPENER_MULTIPLIER      0.50
+#define PROP_TIER2_RISK_PCT              1.05
+#define PROP_TIER1_RISK_PCT              1.88
+#define PROP_HOUSE_MONEY_SHARE           0.25
+#define PROP_MAX_EFFECTIVE_RISK_PCT      1.98
+#define PROP_DD_DAMPENER_TRIGGER_PCT     2.00
+#define PROP_DD_DAMPENER_MULTIPLIER      0.60
 #define PROP_MAX_CONSECUTIVE_LOSSES      2
-#define PROP_DAILY_PROFIT_LOCK_PCT       2.00
+#define PROP_DAILY_PROFIT_LOCK_PCT       5.20
 
 //--- Mode B (Asymmetric Growth) Risk Parameters
-#define GROWTH_TIER2_RISK_PCT            0.80
-#define GROWTH_TIER1_RISK_PCT            1.10
-#define GROWTH_HOUSE_MONEY_SHARE         0.30
-#define GROWTH_MAX_EFFECTIVE_RISK_PCT    2.00
-#define GROWTH_MAX_REMAINING_DD_CAP_PCT  1.80
-#define GROWTH_DD_DAMPENER_TRIGGER_PCT   3.00
-#define GROWTH_DD_DAMPENER_CLAMP_PCT     0.50
+#define GROWTH_TIER2_RISK_PCT            1.00
+#define GROWTH_TIER1_RISK_PCT            1.65
+#define GROWTH_HOUSE_MONEY_SHARE         0.40
+#define GROWTH_MAX_EFFECTIVE_RISK_PCT    1.95
+#define GROWTH_MAX_REMAINING_DD_CAP_PCT  1.95
+#define GROWTH_DD_DAMPENER_TRIGGER_PCT   2.50
+#define GROWTH_DD_DAMPENER_CLAMP_PCT     0.55
 
 //+------------------------------------------------------------------+
 //| System Enumerations                                              |
@@ -615,10 +617,12 @@ struct SActiveTradeContext
 //| Shared Pure Utility & Conversion Functions                       |
 //+------------------------------------------------------------------+
 
-//--- Normalize price to symbol tick size and digits
+//--- Normalize price to symbol tick size (prevents 10015/10016 invalid price/stops) and digits (prevents IEEE 754 .999999)
 inline double NormalizeSymbolPrice(const string symbol, const double rawPrice)
   {
    double tickSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(tickSize <= 0.0)
+      tickSize = SymbolInfoDouble(symbol, SYMBOL_POINT);
    int    digits   = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
    if(tickSize > 0.0)
       return NormalizeDouble(MathRound(rawPrice / tickSize) * tickSize, digits);

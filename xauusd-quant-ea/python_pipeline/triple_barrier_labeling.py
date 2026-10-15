@@ -184,10 +184,10 @@ def convert_telemetry_records_to_labeled_samples(
     """
     samples: List[LabeledCandidateSample] = []
     for rec in records:
-        if rec.label_2_5r in (0, 1):
-            lbl = rec.label_2_5r
+        if rec.realized_r_multiple > 0.05:
+            lbl = 1
         else:
-            lbl = 1 if (rec.mfe_r >= cfg.upper_profit_target_r or rec.realized_r_multiple >= 2.25) else 0
+            lbl = 0
 
         upper_px = (
             rec.entry_limit_price + cfg.upper_profit_target_r * rec.sl_distance_usd
@@ -237,7 +237,7 @@ def compute_concurrency_uniqueness_weights(
             if s_j.signal_time_utc <= s_i.exit_time_utc and s_j.exit_time_utc >= s_i.signal_time_utc:
                 overlap_count += 1
         uniqueness = 1.0 / float(overlap_count)
-        magnitude_boost = 1.0 + 0.10 * min(3.0, abs(s_i.realized_r))
+        magnitude_boost = 1.0 + 0.45 * min(3.0, abs(s_i.realized_r))
         raw_weights.append(uniqueness * magnitude_boost)
 
     mean_w = sum(raw_weights) / float(n)

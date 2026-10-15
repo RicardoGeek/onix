@@ -194,10 +194,53 @@ class NativeResidualMetaClassifier:
             return self
 
         n = float(len(samples))
-        lr = self.learning_rate
 
-        for epoch in range(self.epochs):
-            step_lr = lr / (1.0 + 0.008 * epoch)
+        # 1. Compute feature means and standard deviations on training samples
+        means: List[float] = [0.0] * self.n_features
+        stds: List[float] = [1.0] * self.n_features
+        for f in range(self.n_features):
+            vals = [float(s.features[f]) for s in samples]
+            mu = sum(vals) / n
+            var = sum((v - mu) ** 2 for v in vals) / n
+            means[f] = mu
+            stds[f] = max(1e-4, math.sqrt(var))
+
+        # 2. Initialize clean weights in standardized z-space
+        rng = random.Random(self.seed)
+        z_lin_w: List[float] = [0.0] * self.n_features
+        z_lin_b: float = 0.85
+        z_hid_w1: List[List[float]] = [
+            [rng.uniform(-0.35, 0.35) for _ in range(self.hidden_dim)]
+            for _ in range(self.n_features)
+        ]
+        z_hid_b1: List[float] = [rng.uniform(-0.15, 0.15) for _ in range(self.hidden_dim)]
+        z_hid_w2: List[float] = [rng.uniform(-0.45, 0.45) for _ in range(self.hidden_dim)]
+        z_hid_b2: float = 0.0
+
+        z_samples: List[Tuple[List[float], float, float, float]] = []
+        for s in samples:
+            z_x = [
+                (float(s.features[f]) - means[f]) / stds[f]
+                for f in range(self.n_features)
+            ]
+            r_val = float(s.realized_r)
+            if r_val <= 0.0:
+                y_target = 0.10
+                w_sample = 2.05
+            elif r_val >= 0.60:
+                y_target = 0.95
+                w_sample = 3.10
+            else:
+                y_target = 0.75
+                w_sample = 1.75
+            z_samples.append((z_x, y_target, w_sample, r_val))
+
+        lr = 0.11
+        l2 = 0.0018
+        epochs = 1100
+
+        for epoch in range(epochs):
+            step_lr = lr / (1.0 + 0.0018 * epoch)
             grad_w_lin = [0.0] * self.n_features
             grad_b_lin = 0.0
             grad_w1 = [[0.0] * self.hidden_dim for _ in range(self.n_features)]
@@ -205,43 +248,60 @@ class NativeResidualMetaClassifier:
             grad_w2 = [0.0] * self.hidden_dim
             grad_b2 = 0.0
 
-            for s in samples:
-                x = s.features
-                y = float(s.label)
-                w_sample = float(s.sample_weight)
+            for z_x, y_t, w_sample, r_val in z_samples:
+                lin_logit = z_lin_b + sum(w * xi for w, xi in zip(z_lin_w, z_x))
+                h_act: List[float] = []
+                for h in range(self.hidden_dim):
+                    pre = z_hid_b1[h] + sum(z_hid_w1[f][h] * z_x[f] for f in range(self.n_features))
+                    h_act.append(math.tanh(max(-15.0, min(15.0, pre))))
+                hid_logit = z_hid_b2 + sum(z_hid_w2[h] * h_act[h] for h in range(self.hidden_dim))
+                prob = _sigmoid(lin_logit + hid_logit)
 
-                prob, h_act = self._forward_single(x)
-                err = (prob - y) * w_sample
+                dyn_w = w_sample
+                if r_val <= 0.0 and prob > 0.66:
+                    dyn_w *= (1.0 + 5.0 * (prob - 0.66))
+                elif r_val >= 0.70 and prob < 0.75:
+                    dyn_w *= (1.0 + 4.0 * (0.75 - prob))
+
+                err = (prob - y_t) * dyn_w
 
                 for f in range(self.n_features):
-                    grad_w_lin[f] += err * x[f]
+                    grad_w_lin[f] += err * z_x[f]
                 grad_b_lin += err
 
                 for h in range(self.hidden_dim):
                     grad_w2[h] += err * h_act[h]
-                    dh = err * self.hidden_w2[h] * (1.0 - h_act[h] * h_act[h])
+                    dh = err * z_hid_w2[h] * (1.0 - h_act[h] * h_act[h])
                     grad_b1[h] += dh
                     for f in range(self.n_features):
-                        grad_w1[f][h] += dh * x[f]
+                        grad_w1[f][h] += dh * z_x[f]
                 grad_b2 += err
 
-            # Apply L2-regularized gradient step
             for f in range(self.n_features):
-                self.linear_weights[f] -= step_lr * (
-                    (grad_w_lin[f] / n) + self.l2_reg * self.linear_weights[f]
-                )
+                z_lin_w[f] -= step_lr * ((grad_w_lin[f] / n) + l2 * z_lin_w[f])
                 for h in range(self.hidden_dim):
-                    self.hidden_w1[f][h] -= step_lr * (
-                        (grad_w1[f][h] / n) + self.l2_reg * self.hidden_w1[f][h]
-                    )
+                    z_hid_w1[f][h] -= step_lr * ((grad_w1[f][h] / n) + l2 * z_hid_w1[f][h])
 
-            self.linear_bias -= step_lr * (grad_b_lin / n)
-            self.hidden_b2 -= step_lr * (grad_b2 / n)
+            z_lin_b -= step_lr * (grad_b_lin / n)
+            z_hid_b2 -= step_lr * (grad_b2 / n)
             for h in range(self.hidden_dim):
-                self.hidden_w2[h] -= step_lr * (
-                    (grad_w2[h] / n) + self.l2_reg * self.hidden_w2[h]
-                )
-                self.hidden_b1[h] -= step_lr * (grad_b1[h] / n)
+                z_hid_w2[h] -= step_lr * ((grad_w2[h] / n) + l2 * z_hid_w2[h])
+                z_hid_b1[h] -= step_lr * (grad_b1[h] / n)
+
+        # 3. Fold z-score standardization (means, stds) directly into raw Gemm weights & biases
+        for f in range(self.n_features):
+            self.linear_weights[f] = z_lin_w[f] / stds[f]
+        self.linear_bias = z_lin_b - sum(z_lin_w[f] * means[f] / stds[f] for f in range(self.n_features))
+
+        for f in range(self.n_features):
+            for h in range(self.hidden_dim):
+                self.hidden_w1[f][h] = z_hid_w1[f][h] / stds[f]
+        for h in range(self.hidden_dim):
+            self.hidden_b1[h] = z_hid_b1[h] - sum(
+                z_hid_w1[f][h] * means[f] / stds[f] for f in range(self.n_features)
+            )
+            self.hidden_w2[h] = z_hid_w2[h]
+        self.hidden_b2 = z_hid_b2
 
         return self
 
@@ -325,56 +385,21 @@ def run_purged_walk_forward_training(
     splits = splitter.split(samples)
     fold_metrics: List[FoldMetrics] = []
 
-    # Check if LightGBM + skl2onnx/onnxmltools are installed; otherwise use NativeResidualMetaClassifier
-    use_lgbm = False
-    try:
-        import lightgbm as lgb  # type: ignore
-        import numpy as np  # type: ignore
-        import onnxmltools  # type: ignore
-
-        use_lgbm = True
-    except ImportError:
-        use_lgbm = False
-
     for fold_i, (train_idx, val_idx) in enumerate(splits, start=1):
         train_set = [samples[i] for i in train_idx]
         val_set = [samples[i] for i in val_idx]
 
-        if use_lgbm:
-            import lightgbm as lgb  # type: ignore
-            import numpy as np  # type: ignore
-
-            x_tr = np.array([s.features for s in train_set], dtype=np.float32)
-            y_tr = np.array([s.label for s in train_set], dtype=np.int64)
-            w_tr = np.array([s.sample_weight for s in train_set], dtype=np.float32)
-            x_va = np.array([s.features for s in val_set], dtype=np.float32)
-
-            clf = lgb.LGBMClassifier(**cfg.lgbm_params)
-            clf.fit(x_tr, y_tr, sample_weight=w_tr)
-            val_probs = clf.predict_proba(x_va)[:, 1].tolist()
-        else:
-            clf_native = NativeResidualMetaClassifier(seed=cfg.random_seed + fold_i)
-            clf_native.fit(train_set)
-            val_probs = [clf_native.predict_proba_pos(s.features) for s in val_set]
+        clf_native = NativeResidualMetaClassifier(seed=cfg.random_seed + fold_i)
+        clf_native.fit(train_set)
+        val_probs = [clf_native.predict_proba_pos(s.features) for s in val_set]
 
         metrics = _evaluate_fold(fold_i, len(train_set), val_set, val_probs, cfg)
         fold_metrics.append(metrics)
 
-    # Fit Final Production Model on All Available Labeled Samples & Export ONNX
-    if use_lgbm:
-        import lightgbm as lgb  # type: ignore
-        import numpy as np  # type: ignore
-
-        x_all = np.array([s.features for s in samples], dtype=np.float32)
-        y_all = np.array([s.label for s in samples], dtype=np.int64)
-        w_all = np.array([s.sample_weight for s in samples], dtype=np.float32)
-        final_model = lgb.LGBMClassifier(**cfg.lgbm_params)
-        final_model.fit(x_all, y_all, sample_weight=w_all)
-        exported_path = export_trained_model_to_onnx(final_model, output_onnx_path)
-    else:
-        final_native = NativeResidualMetaClassifier(seed=cfg.random_seed)
-        final_native.fit(samples)
-        exported_path = export_trained_model_to_onnx(final_native.to_export_dict(), output_onnx_path)
+    # Fit Final Production Model on All Available Labeled Samples & Export Native ONNX
+    final_native = NativeResidualMetaClassifier(seed=cfg.random_seed)
+    final_native.fit(samples)
+    exported_path = export_trained_model_to_onnx(final_native.to_export_dict(), output_onnx_path)
 
     return exported_path, fold_metrics
 

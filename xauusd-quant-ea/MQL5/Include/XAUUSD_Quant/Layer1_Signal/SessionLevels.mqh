@@ -87,7 +87,29 @@ private:
       return atrHistory[idx5th];
      }
 
-   //--- Compute Asian Session High/Low (00:00 - 07:00 UTC) and Previous Day High/Low
+   double            m_londonHigh;
+   double            m_londonLow;
+   bool              m_londonComplete;
+   bool              m_asianHighSweptToday;
+   bool              m_asianLowSweptToday;
+   bool              m_londonHighSweptToday;
+   bool              m_londonLowSweptToday;
+   bool              m_pdhSweptToday;
+   bool              m_pdlSweptToday;
+   double            m_sweptPricesToday[MAX_FRACTAL_POOLS];
+   int               m_sweptCountToday;
+
+   bool              WasPriceSweptToday(const double price) const
+     {
+      for(int i = 0; i < m_sweptCountToday; i++)
+        {
+         if(MathAbs(m_sweptPricesToday[i] - price) < 0.35)
+            return true;
+        }
+      return false;
+     }
+
+   //--- Compute Asian Session High/Low (00:00 - 06:30 UTC), London H/L (06:30 - 11:30 UTC), and PDH/PDL
    void              UpdateDailyAndAsianBoundaries(const datetime utcNow)
      {
       MqlDateTime dtUTC;
@@ -96,7 +118,21 @@ private:
       dtUTC.min  = 0;
       dtUTC.sec  = 0;
       datetime todayStartUTC = StructToTime(dtUTC);
-      datetime asianEndUTC   = todayStartUTC + 7 * 3600; // 07:00 UTC
+      datetime asianEndUTC   = todayStartUTC + 6 * 3600 + 30 * 60; // 06:30 UTC
+
+      if(todayStartUTC != m_currentDayStartUTC)
+        {
+         m_sweptCountToday      = 0;
+         m_londonHigh           = 0.0;
+         m_londonLow            = 0.0;
+         m_londonComplete       = false;
+         m_asianHighSweptToday  = false;
+         m_asianLowSweptToday   = false;
+         m_londonHighSweptToday = false;
+         m_londonLowSweptToday  = false;
+         m_pdhSweptToday        = false;
+         m_pdlSweptToday        = false;
+        }
 
       m_currentDayStartUTC = todayStartUTC;
       m_ref.sessionDateUTC = todayStartUTC;
@@ -125,6 +161,32 @@ private:
            }
         }
 
+      // Compute completed London Session High/Low (06:30 - 11:30 UTC) ONLY once NY Killzone begins (> 11:30 UTC)
+      datetime londonEndUTC = todayStartUTC + 11 * 3600 + 30 * 60;
+      m_londonComplete      = (utcNow >= londonEndUTC);
+      if(m_londonComplete)
+        {
+         datetime serverLondonStart = UTCTimeToServer(asianEndUTC, m_brokerGMTOffset);
+         datetime serverLondonEnd   = UTCTimeToServer(londonEndUTC, m_brokerGMTOffset);
+         MqlRates lonRates[];
+         int copiedLon = CopyRates(m_symbol, PERIOD_M5, serverLondonStart, serverLondonEnd, lonRates);
+         if(copiedLon > 0)
+           {
+            double lHigh = -DBL_MAX;
+            double lLow  =  DBL_MAX;
+            for(int i = 0; i < copiedLon; i++)
+              {
+               if(lonRates[i].high > lHigh) lHigh = lonRates[i].high;
+               if(lonRates[i].low  < lLow)  lLow  = lonRates[i].low;
+              }
+            if(lHigh > lLow && lLow > 0.0)
+              {
+               m_londonHigh = lHigh;
+               m_londonLow  = lLow;
+              }
+           }
+        }
+
       // Compute PDH and PDL from previous trading day
       MqlRates d1Rates[];
       ArraySetAsSeries(d1Rates, true);
@@ -140,7 +202,8 @@ private:
                                       const datetime formedTime,
                                       const ENUM_LIQUIDITY_TYPE poolType,
                                       const int touchCount = 1,
-                                      const bool isEqualCluster = false)
+                                      const bool isEqualCluster = false,
+                                      const bool forceSwept = false)
      {
       if(price <= 0.0 || m_poolCount >= MAX_FRACTAL_POOLS)
          return;
@@ -150,28 +213,36 @@ private:
       m_pools[m_poolCount].formedTime     = formedTime;
       m_pools[m_poolCount].poolType       = poolType;
       m_pools[m_poolCount].touchCount     = touchCount;
-      m_pools[m_poolCount].isSwept        = false;
+      m_pools[m_poolCount].isSwept        = (forceSwept || WasPriceSweptToday(price));
       m_pools[m_poolCount].sweptTime      = 0;
       m_pools[m_poolCount].isEqualCluster = isEqualCluster;
       m_poolCount++;
      }
 
-   //--- Rebuild Institutional Liquidity Pools (Asian H/L, PDH/PDL, M15 5-bar Fractals & Equal H/L)
+   //--- Rebuild Institutional Liquidity Pools (Asian H/L, completed London H/L, PDH/PDL, M15 5-bar Fractals & Equal H/L)
    void              RebuildLiquidityPools()
      {
       m_poolCount = 0;
 
-      // 1. Primary Session Levels (Asian High/Low, PDH, PDL)
-      if(m_ref.asianHigh > 0.0 && m_ref.asianLow > 0.0)
+      // 1. Primary Session Levels (Asian High/Low after 06:30 UTC, London High/Low after 11:30 UTC, PDH, PDL)
+      if(m_ref.asianComplete && m_ref.asianHigh > 0.0 && m_ref.asianLow > 0.0)
         {
-         AddLiquidityPool(m_ref.asianHigh, m_currentDayStartUTC, LIQ_ASIAN_HIGH, 2, false);
-         AddLiquidityPool(m_ref.asianLow,  m_currentDayStartUTC, LIQ_ASIAN_LOW,  2, false);
+         AddLiquidityPool(m_ref.asianHigh, m_currentDayStartUTC, LIQ_ASIAN_HIGH, 2, false, m_asianHighSweptToday);
+         AddLiquidityPool(m_ref.asianLow,  m_currentDayStartUTC, LIQ_ASIAN_LOW,  2, false, m_asianLowSweptToday);
+        }
+
+      if(m_londonComplete && m_londonHigh > 0.0 && m_londonLow > 0.0)
+        {
+         if(MathAbs(m_londonHigh - m_ref.asianHigh) > 0.50)
+            AddLiquidityPool(m_londonHigh, m_currentDayStartUTC + 7 * 3600, LIQ_ASIAN_HIGH, 2, false, m_londonHighSweptToday);
+         if(MathAbs(m_londonLow - m_ref.asianLow) > 0.50)
+            AddLiquidityPool(m_londonLow,  m_currentDayStartUTC + 7 * 3600, LIQ_ASIAN_LOW,  2, false, m_londonLowSweptToday);
         }
 
       if(m_ref.pdh > 0.0 && m_ref.pdl > 0.0)
         {
-         AddLiquidityPool(m_ref.pdh, m_currentDayStartUTC - 86400, LIQ_PDH, 2, false);
-         AddLiquidityPool(m_ref.pdl, m_currentDayStartUTC - 86400, LIQ_PDL, 2, false);
+         AddLiquidityPool(m_ref.pdh, m_currentDayStartUTC - 86400, LIQ_PDH, 2, false, m_pdhSweptToday);
+         AddLiquidityPool(m_ref.pdl, m_currentDayStartUTC - 86400, LIQ_PDL, 2, false, m_pdlSweptToday);
         }
 
       // 2. Scan M15 5-Bar Fractal Swing Highs/Lows and Clustered Equal Highs/Lows
@@ -183,8 +254,11 @@ private:
 
       double equalToleranceUSD = m_equalLevelAtrRatio * MathMax(m_ref.atrM15Current, 1.0);
 
-      // Extract raw 5-bar fractals from M15 series (shift 2..copied-3)
-      // Maintain only fractals that have NOT been invalidated by subsequent M15 closes prior to bar 1
+      double asianMid       = (m_ref.asianHigh > 0.0 && m_ref.asianLow > 0.0)
+                              ? (0.50 * (m_ref.asianHigh + m_ref.asianLow)) : 0.0;
+      double asianInnerHalf = 0.25 * m_ref.asianRange;
+
+      // Extract 5-bar fractals from M15 series (shift 2..copied-3)
       for(int i = 2; i < copied - 2; i++)
         {
          // --- Check 5-Bar Fractal Swing High ---
@@ -197,7 +271,6 @@ private:
            {
             double fHigh = m15[i].high;
             bool alreadyBrokenBeforeNow = false;
-            // Check bars more recent than i (down to index 2) to see if price already closed well above fHigh
             for(int j = i - 1; j >= 2; j--)
               {
                if(m15[j].close > fHigh + equalToleranceUSD)
@@ -209,7 +282,6 @@ private:
 
             if(!alreadyBrokenBeforeNow)
               {
-               // Check if this fractal clusters with an existing M15 swing high within 0.15 * ATR(M15, 14)
                bool mergedCluster = false;
                for(int p = 0; p < m_poolCount; p++)
                  {
@@ -221,13 +293,18 @@ private:
                         m_pools[p].touchCount++;
                         m_pools[p].poolType       = LIQ_EQUAL_HIGHS;
                         m_pools[p].isEqualCluster = true;
+                        m_pools[p].isSwept        = (m_pools[p].isSwept || WasPriceSweptToday(m_pools[p].price));
                         mergedCluster             = true;
                         break;
                        }
                     }
                  }
                if(!mergedCluster)
-                  AddLiquidityPool(fHigh, m15[i].time, LIQ_M15_SWING_HIGH, 1, false);
+                 {
+                  bool outsideAsianCore = (asianMid <= 0.0 || MathAbs(fHigh - asianMid) >= asianInnerHalf);
+                  if(outsideAsianCore)
+                     AddLiquidityPool(fHigh, m15[i].time, LIQ_M15_SWING_HIGH, 1, false);
+                 }
               }
            }
 
@@ -263,13 +340,18 @@ private:
                         m_pools[p].touchCount++;
                         m_pools[p].poolType       = LIQ_EQUAL_LOWS;
                         m_pools[p].isEqualCluster = true;
+                        m_pools[p].isSwept        = (m_pools[p].isSwept || WasPriceSweptToday(m_pools[p].price));
                         mergedCluster             = true;
                         break;
                        }
                     }
                  }
                if(!mergedCluster)
-                  AddLiquidityPool(fLow, m15[i].time, LIQ_M15_SWING_LOW, 1, false);
+                 {
+                  bool outsideAsianCore = (asianMid <= 0.0 || MathAbs(fLow - asianMid) >= asianInnerHalf);
+                  if(outsideAsianCore)
+                     AddLiquidityPool(fLow, m15[i].time, LIQ_M15_SWING_LOW, 1, false);
+                 }
               }
            }
         }
@@ -290,6 +372,9 @@ public:
       m_handleAtrH4            = INVALID_HANDLE;
 
       m_poolCount              = 0;
+      m_londonHigh             = 0.0;
+      m_londonLow              = 0.0;
+      m_sweptCountToday        = 0;
       m_lastM15UpdateBarTime   = 0;
       m_lastM5UpdateBarTime    = 0;
       m_currentDayStartUTC     = 0;
@@ -329,6 +414,14 @@ public:
          return false;
         }
 
+      // Force MT5 terminal/tester to synchronize full multi-timeframe history from broker
+      const ENUM_TIMEFRAMES tfs[6] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_H1, PERIOD_H4, PERIOD_D1};
+      for(int t = 0; t < 6; t++)
+        {
+         MqlRates warmRates[];
+         CopyRates(m_symbol, tfs[t], 0, 500, warmRates);
+        }
+
       Update();
       return true;
      }
@@ -356,22 +449,22 @@ public:
       if(minOfDay >= (20 * 60 + 55) && minOfDay <= (22 * 60 + 10))
          return SESSION_ROLLOVER_BLACKOUT;
 
-      // Asian Session Accumulation: 00:00 - 07:00 UTC (0 - 419)
-      if(minOfDay >= 0 && minOfDay < (7 * 60))
+      // Asian Session Accumulation: 00:00 - 06:30 UTC (0 - 389)
+      if(minOfDay >= 0 && minOfDay < (6 * 60 + 30))
          return SESSION_ASIAN_ACCUMULATION;
 
-      // London Killzone: 07:00 - 10:30 UTC (420 - 630)
-      if(minOfDay >= (7 * 60) && minOfDay <= (10 * 60 + 30))
+      // London Killzone: 06:30 - 10:55 UTC (390 - 655)
+      if(minOfDay >= (6 * 60 + 30) && minOfDay <= (10 * 60 + 55))
          return SESSION_LONDON_KILLZONE;
 
-      // New York Killzone: 12:30 - 16:00 UTC (750 - 960)
-      if(minOfDay >= (12 * 60 + 30) && minOfDay <= (16 * 60))
+      // New York Killzone: 12:00 - 15:55 UTC (720 - 955)
+      if(minOfDay >= (12 * 60) && minOfDay <= (15 * 60 + 55))
          return SESSION_NY_KILLZONE;
 
       return SESSION_OUTSIDE_KILLZONE;
      }
 
-   //--- Return true if currently inside London (07:00-10:30 UTC) or NY (12:30-16:00 UTC) Killzone
+   //--- Return true if currently inside London or NY Killzone
    bool              IsInActiveKillzone(const datetime utcNow) const
      {
       ENUM_KILLZONE_SESSION s = ClassifyKillzoneSession(utcNow);
@@ -427,7 +520,7 @@ public:
    //+------------------------------------------------------------------+
    //| FindSweptLiquidityPool                                           |
    //| Checks if a bar's [barLow, barHigh] pierced any unswept primary  |
-   //| liquidity pool by a distance in [0.15 * ATR_M15, 0.65 * ATR_M15] |
+   //| liquidity pool by a distance in [minPierceUSD, maxPierceUSD]     |
    //+------------------------------------------------------------------+
    bool              FindSweptLiquidityPool(const double barHigh,
                                             const double barLow,
@@ -508,9 +601,27 @@ public:
    //--- Mark a liquidity pool as swept so it is not re-triggered repeatedly
    void              MarkPoolSwept(const ENUM_LIQUIDITY_TYPE poolType, const double poolPrice, const datetime sweptTime)
      {
+      if(poolType == LIQ_ASIAN_HIGH)
+        {
+         if(MathAbs(poolPrice - m_ref.asianHigh) < 0.25) m_asianHighSweptToday  = true;
+         if(MathAbs(poolPrice - m_londonHigh)    < 0.25) m_londonHighSweptToday = true;
+        }
+      else if(poolType == LIQ_ASIAN_LOW)
+        {
+         if(MathAbs(poolPrice - m_ref.asianLow) < 0.25) m_asianLowSweptToday  = true;
+         if(MathAbs(poolPrice - m_londonLow)    < 0.25) m_londonLowSweptToday = true;
+        }
+      else if(poolType == LIQ_PDH) m_pdhSweptToday = true;
+      else if(poolType == LIQ_PDL) m_pdlSweptToday = true;
+
+      if(!WasPriceSweptToday(poolPrice) && m_sweptCountToday < MAX_FRACTAL_POOLS)
+        {
+         m_sweptPricesToday[m_sweptCountToday] = poolPrice;
+         m_sweptCountToday++;
+        }
       for(int i = 0; i < m_poolCount; i++)
         {
-         if(m_pools[i].poolType == poolType && MathAbs(m_pools[i].price - poolPrice) < 0.10)
+         if(MathAbs(m_pools[i].price - poolPrice) < 0.35)
            {
             m_pools[i].isSwept   = true;
             m_pools[i].sweptTime = sweptTime;
@@ -529,22 +640,22 @@ public:
                                                 const double entryPrice,
                                                 const double slDistanceUSD) const
      {
-      double minTargetDist = 3.50 * slDistanceUSD;
-      double maxTargetDist = 5.00 * slDistanceUSD;
+      double minTargetDist = 2.80 * slDistanceUSD;
+      double maxTargetDist = 3.60 * slDistanceUSD;
       double defaultTP2    = (direction == SIGNAL_LONG)
-                             ? (entryPrice + 4.00 * slDistanceUSD)
-                             : (entryPrice - 4.00 * slDistanceUSD);
+                             ? (entryPrice + 3.50 * slDistanceUSD)
+                             : (entryPrice - 3.50 * slDistanceUSD);
 
       if(direction == SIGNAL_LONG)
         {
-         // If sweeping Asian Low, check if Asian High offers at least 3.0R
-         if(sweptType == LIQ_ASIAN_LOW && m_ref.asianHigh > (entryPrice + 3.0 * slDistanceUSD))
+         // If sweeping Asian Low, check if Asian High offers at least 2.80R
+         if(sweptType == LIQ_ASIAN_LOW && m_ref.asianHigh > (entryPrice + 2.80 * slDistanceUSD))
             return MathMin(m_ref.asianHigh, entryPrice + maxTargetDist);
 
-         if(sweptType == LIQ_PDL && m_ref.pdh > (entryPrice + 3.0 * slDistanceUSD))
+         if(sweptType == LIQ_PDL && m_ref.pdh > (entryPrice + 2.80 * slDistanceUSD))
             return MathMin(m_ref.pdh, entryPrice + maxTargetDist);
 
-         // Search opposing upper pools within [3.5R, 5.0R]
+         // Search opposing upper pools within [2.80R, 3.60R]
          for(int i = 0; i < m_poolCount; i++)
            {
             double dist = m_pools[i].price - entryPrice;
@@ -554,16 +665,16 @@ public:
         }
       else if(direction == SIGNAL_SHORT)
         {
-         // If sweeping Asian High, check if Asian Low offers at least 3.0R
+         // If sweeping Asian High, check if Asian Low offers at least 2.80R
          if(sweptType == LIQ_ASIAN_HIGH && m_ref.asianLow > 0.0 &&
-            (entryPrice - m_ref.asianLow) > (3.0 * slDistanceUSD))
+            (entryPrice - m_ref.asianLow) > (2.80 * slDistanceUSD))
             return MathMax(m_ref.asianLow, entryPrice - maxTargetDist);
 
          if(sweptType == LIQ_PDH && m_ref.pdl > 0.0 &&
-            (entryPrice - m_ref.pdl) > (3.0 * slDistanceUSD))
+            (entryPrice - m_ref.pdl) > (2.80 * slDistanceUSD))
             return MathMax(m_ref.pdl, entryPrice - maxTargetDist);
 
-         // Search opposing lower pools within [3.5R, 5.0R]
+         // Search opposing lower pools within [2.80R, 3.60R]
          for(int i = 0; i < m_poolCount; i++)
            {
             double dist = entryPrice - m_pools[i].price;

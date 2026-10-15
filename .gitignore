@@ -1,0 +1,16 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Temporary MT5 logs, reports, and tester configs
+*.log
+*.ini
+reports/
+*.csv
+
+# Explicitly track compiled EA binary and embedded ONNX model
+!*.ex5
+!*.onnx
