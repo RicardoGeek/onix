@@ -70,7 +70,7 @@ onix/
    - `InpUseOnnxModel` = `true`
    - `InpOnnxTier2Threshold` = `0.58`
    - `InpOnnxTier1Threshold` = `0.72`
-   - `InpBrokerGMTOffsetHours` = `2` (adjust if your broker server is not `GMT+2`)
+   - `InpBrokerGMTOffsetHours` = `2` *(used only as a fallback inside MT5 Strategy Tester; on Live/Demo/VPS, the EA **automatically detects** the broker's UTC offset on every tick via `TimeTradeServer()`/`TimeCurrent()` vs `TimeGMT()`, whether on Pepperstone `GMT+2`/`GMT+3` or Upcomers `UTC+1`)*
 
 ---
 

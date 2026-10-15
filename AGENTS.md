@@ -114,6 +114,15 @@ This document contains the complete system context, Windows VM paths, architectu
 - **Problem**: In `xauusd_setup_telemetry.csv`, `setup_id` appends a 2-digit per-run counter (`timestamp_utc * 100 + counter`), which changes across separate Strategy Tester runs. However, on `POSITION_CLOSED` rows, `Logger.mqh` writes `m_activeSetup.signalTimeUTC` into `timestamp_utc`.
 - **Rule**: Always map `POSITION_CLOSED` outcomes to `SIGNAL_TRIGGERED` candidates directly by `timestamp_utc` (as implemented in `python_pipeline/retrain_multiyear_onnx.py`).
 
+### Lesson 9: Automatic Quantized Broker GMT Offset Detection (`Definitions.mqh`)
+- **Problem**: Different brokers use different server timezones (e.g., Pepperstone shifts between `GMT+2` in US Winter and `GMT+3` in US Daylight Saving Time; Upcomers uses `UTC+1`). However, naive integer division `(TimeCurrent() - TimeGMT()) / 3600` in MQL5 has three traps:
+  1. **Tick-Lag Truncation**: If the last tick arrived 2 seconds ago (`10,798` seconds instead of `10,800` seconds on `GMT+3`), integer division `10798 / 3600` truncates to **`2` hours instead of `3` hours**.
+  2. **Weekend / Quiet-Market Freeze**: On weekends, `TimeCurrent()` freezes on Friday's last tick while `TimeGMT()` continues advancing.
+  3. **Strategy Tester Behavior**: Inside MT5 Strategy Tester (`MQLInfoInteger(MQL_TESTER)`), MT5 sets `TimeGMT() == TimeCurrent()`, so `TimeCurrent() - TimeGMT() == 0`.
+- **Solution Implemented in `ResolveEffectiveGMTOffsetSeconds()` (`Definitions.mqh`)**:
+  - In **Live / Demo / VPS (`!MQLInfoInteger(MQL_TESTER)`)**: Compares `TimeTradeServer()` (or `TimeCurrent()` when actively ticking within 5 minutes) against `TimeGMT()`, and **rounds to the nearest 15-minute (`900s`) timezone boundary** (`MathRound(diffSeconds / 900.0) * 900`). This is immune to tick lag, weekend freezes, and up to `±7` minutes of local PC/VPS clock drift, while automatically handling US DST shifts and any broker timezone (`UTC+1`, `UTC+2`, `UTC+3`).
+  - In **Strategy Tester (`MQLInfoInteger(MQL_TESTER)`)**: Uses `InpBrokerGMTOffsetHours` (`2`) as the backtest fallback.
+
 ---
 
 ## 4. One-Block Restore & Retrain Command Reference

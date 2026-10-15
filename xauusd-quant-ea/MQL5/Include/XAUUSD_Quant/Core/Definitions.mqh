@@ -658,29 +658,62 @@ inline double NormalizeSymbolLots(const string symbol, const double rawLots)
    return stepped;
   }
 
+//--- Dynamically resolve Broker Server -> GMT/UTC offset in seconds
+//    - Live / Demo / VPS: Auto-detects offset via TimeTradeServer()/TimeCurrent() vs TimeGMT(),
+//      quantized to nearest 15-minute (900s) timezone boundary (immune to tick lag & PC clock drift).
+//    - Strategy Tester: Uses fallbackGMTOffsetHours because MT5 Tester sets TimeGMT() == TimeCurrent().
+inline int ResolveEffectiveGMTOffsetSeconds(const int fallbackGMTOffsetHours)
+  {
+   if(MQLInfoInteger(MQL_TESTER))
+      return (fallbackGMTOffsetHours * 3600);
+
+   datetime gmtNow    = TimeGMT();
+   datetime serverNow = TimeTradeServer();
+   datetime tickNow   = TimeCurrent();
+
+   // Prefer TimeCurrent() when market is actively ticking (within 5 minutes of TimeTradeServer)
+   if(tickNow > 0 && (serverNow <= 0 || MathAbs((long)tickNow - (long)serverNow) < 300))
+      serverNow = tickNow;
+
+   if(gmtNow > 0 && serverNow > 0)
+     {
+      double diffSeconds = (double)((long)serverNow - (long)gmtNow);
+      double diffHours   = diffSeconds / 3600.0;
+      if(diffHours >= -12.5 && diffHours <= 14.5)
+        {
+         long quantizedSeconds = (long)MathRound(diffSeconds / 900.0) * 900;
+         return (int)quantizedSeconds;
+        }
+     }
+
+   return (fallbackGMTOffsetHours * 3600);
+  }
+
+//--- Return effective Broker GMT offset in hours (for logging & HUD display)
+inline double ResolveEffectiveGMTOffsetHours(const int fallbackGMTOffsetHours)
+  {
+   return ((double)ResolveEffectiveGMTOffsetSeconds(fallbackGMTOffsetHours) / 3600.0);
+  }
+
 //--- Resolve current UTC timestamp reliably across live & Strategy Tester
 inline datetime ResolveCurrentUTCTime(const int brokerGMTOffsetHours, const bool useAutoTimeGMT = true)
   {
-   // In Strategy Tester, TimeCurrent() reflects simulated server time; apply configured broker GMT offset
    if(MQLInfoInteger(MQL_TESTER) || !useAutoTimeGMT)
       return (TimeCurrent() - (datetime)(brokerGMTOffsetHours * 3600));
 
-   datetime gmt = TimeGMT();
-   if(gmt > 0)
-      return gmt;
-   return (TimeCurrent() - (datetime)(brokerGMTOffsetHours * 3600));
+   return (TimeCurrent() - (datetime)ResolveEffectiveGMTOffsetSeconds(brokerGMTOffsetHours));
   }
 
-//--- Convert Broker Server Time to UTC using offset
+//--- Convert Broker Server Time to UTC using auto-detected offset (or fallback in Tester)
 inline datetime ServerTimeToUTC(const datetime serverTime, const int brokerGMTOffsetHours)
   {
-   return (serverTime - (datetime)(brokerGMTOffsetHours * 3600));
+   return (serverTime - (datetime)ResolveEffectiveGMTOffsetSeconds(brokerGMTOffsetHours));
   }
 
-//--- Convert UTC Time to Broker Server Time using offset
+//--- Convert UTC Time to Broker Server Time using auto-detected offset (or fallback in Tester)
 inline datetime UTCTimeToServer(const datetime utcTime, const int brokerGMTOffsetHours)
   {
-   return (utcTime + (datetime)(brokerGMTOffsetHours * 3600));
+   return (utcTime + (datetime)ResolveEffectiveGMTOffsetSeconds(brokerGMTOffsetHours));
   }
 
 //--- Human-readable string formatters for telemetry & logging

@@ -43,7 +43,7 @@ input double         InpOnnxTier2Threshold        = 0.58;               // Minim
 input double         InpOnnxTier1Threshold        = 0.72;               // High-Conviction ONNX Win Probability (Tier 1)
 
 input group "=== [3] LAYER 1: SWEEP & VOLUME PROFILE ENGINE ==="
-input int            InpBrokerGMTOffsetHours      = 2;                  // Broker Server GMT Offset (Hours, e.g. +2 or +3)
+input int            InpBrokerGMTOffsetHours      = 2;                  // Tester Fallback GMT Offset (Live/VPS Auto-Detects via TimeGMT)
 input double         InpVPBinSizeUSD              = 0.25;               // Intraday M1 Volume Profile Bin Width ($0.25)
 input double         InpMinSweepAtrRatio          = 0.15;               // Minimum Liquidity Sweep Depth (x ATR_M15)
 input double         InpMaxSweepAtrRatio          = 0.65;               // Maximum Liquidity Sweep Depth (x ATR_M15)
@@ -104,12 +104,16 @@ void UpdateChartHUD()
    g_volumeProfile.GetSnapshot(vpSnap);
    g_executionManager.GetActiveContext(tradeCtx);
 
+   double   effOffsetHrs = ResolveEffectiveGMTOffsetHours(InpBrokerGMTOffsetHours);
+   datetime utcNow       = ResolveCurrentUTCTime(InpBrokerGMTOffsetHours);
+
    string hud = StringFormat(
       "========================================================\n"
       " XAUUSD HYBRID QUANTITATIVE SNIPER EA v%s (ONNX)\n"
       "========================================================\n"
       " [MODE]       : %s (%s)\n"
       " [ONNX AI]    : %s | Ready: %s\n"
+      " [CLOCK / GMT]: UTC%+.2f (%s) | Server: %s | UTC: %s\n"
       " [SESSION]    : %s | Tradable Regime: %s\n"
       "--------------------------------------------------------\n"
       " [EQUITY]     : $%.2f | Balance: $%.2f\n"
@@ -132,6 +136,10 @@ void UpdateChartHUD()
       (riskSnap.ddType == DD_TRAILING_HWM ? "TRAILING_HWM" : "STATIC_INITIAL"),
       (InpUseOnnxModel ? "NATIVE_ONNX" : "DETERMINISTIC_COLLECTION"),
       (g_onnxLabeler.IsModelReady() ? "YES" : "FALLBACK"),
+      effOffsetHrs,
+      (MQLInfoInteger(MQL_TESTER) ? "TESTER_CFG" : "AUTO_GMT"),
+      TimeToString(now, TIME_MINUTES),
+      TimeToString(utcNow, TIME_MINUTES),
       KillzoneSessionToString(sessRef.currentSession),
       (sessRef.isTradableRegime ? "YES" : "NO (FLAT/EXHAUSTED)"),
       riskSnap.currentEquity,
@@ -294,6 +302,16 @@ int OnInit()
       if(InpUseOnnxModel)
          g_logger.Warn("ONNX initialization returned warning; deterministic fallback scorer active.");
      }
+
+   datetime srvTime = (TimeTradeServer() > 0) ? TimeTradeServer() : TimeCurrent();
+   datetime gmtTime = ResolveCurrentUTCTime(InpBrokerGMTOffsetHours);
+   double   effOff  = ResolveEffectiveGMTOffsetHours(InpBrokerGMTOffsetHours);
+   g_logger.Info(StringFormat(
+      "Server Time: %s | GMT Time: %s | Effective GMT Offset (hours): %+.2f [%s]",
+      TimeToString(srvTime, TIME_DATE|TIME_SECONDS),
+      TimeToString(gmtTime, TIME_DATE|TIME_SECONDS),
+      effOff,
+      (MQLInfoInteger(MQL_TESTER) ? "StrategyTesterFallback" : "AutoDetectedLive")));
 
    g_logger.Info(StringFormat(
       "XAUUSD_Sniper_ONNX v%s Initialized Successfully [Mode=%s | UseONNX=%s]",
