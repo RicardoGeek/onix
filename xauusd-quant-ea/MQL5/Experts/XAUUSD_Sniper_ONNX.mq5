@@ -34,8 +34,8 @@ input ENUM_DD_TYPE   InpDrawdownType              = DD_TRAILING_HWM;    // Max D
 input double         InpCommissionPerLotRoundTurn = 7.00;               // Round-Turn ECN Commission per Lot (USD)
 input double         InpPropTier2RiskPct          = 1.05;               // Prop Mode Tier-2 Risk % (0.58 <= P < 0.72)
 input double         InpPropTier1RiskPct          = 1.88;               // Prop Mode Tier-1 Risk % (P >= 0.72)
-input double         InpGrowthTier2RiskPct        = 1.00;               // Growth Mode Tier-2 Base Risk % (0.58 <= P < 0.72)
-input double         InpGrowthTier1RiskPct        = 1.65;               // Growth Mode Tier-1 Base Risk % (P >= 0.72)
+input double         InpGrowthTier2RiskPct        = 1.10;               // Growth Mode Tier-2 Base Risk % (0.58 <= P < 0.72)
+input double         InpGrowthTier1RiskPct        = 1.92;               // Growth Mode Tier-1 Base Risk % (P >= 0.72)
 
 input group "=== [2] LAYER 2: NATIVE ONNX META-LABELER ==="
 input bool           InpUseOnnxModel              = true;               // Enable Native ONNX Model (false = Deterministic / Data Export)

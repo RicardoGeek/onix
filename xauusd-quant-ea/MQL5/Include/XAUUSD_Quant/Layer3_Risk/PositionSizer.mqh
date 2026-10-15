@@ -210,56 +210,53 @@ public:
         }
       else
         {
-         // --- MODE B: MODE_ASYMMETRIC_GROWTH ($500 Moonshot Compounder) ---
+         // --- MODE B: MODE_ASYMMETRIC_GROWTH (Personal Account Compounder + 40% House-Money Accelerator) ---
          baseRiskPct = isTier1Signal ? m_growthTier1RiskPct : m_growthTier2RiskPct;
 
-         // Drawdown Dampener: smooth step-down to prevent hitting 5.40% total DD breaker while keeping recovery power
+         // Drawdown Dampener: smooth proportional step-down to prevent hitting 5.40% total DD breaker
          if(currentTotalDDPct >= 3.60)
-           {
-            effectiveRiskPct = 0.45;
-            baseRiskUSD      = equity * (effectiveRiskPct / 100.0);
-            riskCapitalUSD   = baseRiskUSD;
-           }
+            effectiveRiskPct = baseRiskPct * 0.58;
          else if(currentTotalDDPct >= 2.20 || dampenerActive)
-           {
-            effectiveRiskPct = 0.65;
-            baseRiskUSD      = equity * (effectiveRiskPct / 100.0);
-            riskCapitalUSD   = baseRiskUSD;
-           }
+            effectiveRiskPct = baseRiskPct * 0.72;
          else if(currentTotalDDPct >= 1.25)
-           {
-            effectiveRiskPct = baseRiskPct * 0.78;
-            baseRiskUSD      = equity * (effectiveRiskPct / 100.0);
-            riskCapitalUSD   = baseRiskUSD;
-           }
+            effectiveRiskPct = baseRiskPct * 0.85;
          else
-           {
             effectiveRiskPct = baseRiskPct;
-            baseRiskUSD      = equity * (effectiveRiskPct / 100.0);
-            riskCapitalUSD   = baseRiskUSD;
 
-            // House-Money Profit Buffer Accelerator when DD < 1.00% and 0 losses today
-            double weeklyProfitUSD = m_equityGuard.GetWeeklyRealizedProfitUSD();
-            int    lossesToday     = m_equityGuard.GetConsecutiveLossesToday();
-            if(weeklyProfitUSD > 0.0 && currentTotalDDPct < 1.00 && lossesToday == 0 && (isTier1Signal || onnxWinProbability >= 0.66))
-              {
-               double share      = isTier1Signal ? GROWTH_HOUSE_MONEY_SHARE : (GROWTH_HOUSE_MONEY_SHARE * 0.50);
-               double maxRiskPct = isTier1Signal ? GROWTH_MAX_EFFECTIVE_RISK_PCT : 1.55;
-               houseMoneyBonusUSD = share * weeklyProfitUSD;
-               double maxAllowedCapitalUSD = equity * (maxRiskPct / 100.0);
+         double weeklyProfitUSD      = m_equityGuard.GetWeeklyRealizedProfitUSD();
+         double dailyPnLUSD          = m_equityGuard.GetDailyRealizedPnLUSD();
+         int    lossesToday          = m_equityGuard.GetConsecutiveLossesToday();
+         double dailyScratchFloorUSD = (m_equityGuard.GetDayStartReference() > 0.0 ? m_equityGuard.GetDayStartReference() * 0.0015 : 5.0);
 
-               if((baseRiskUSD + houseMoneyBonusUSD) > maxAllowedCapitalUSD)
-                  houseMoneyBonusUSD = MathMax(0.0, maxAllowedCapitalUSD - baseRiskUSD);
+         if(dailyPnLUSD < -dailyScratchFloorUSD || lossesToday > 0)
+            effectiveRiskPct = MathMin(effectiveRiskPct, baseRiskPct * 0.42);
 
-               riskCapitalUSD            = baseRiskUSD + houseMoneyBonusUSD;
-               effectiveRiskPct          = (riskCapitalUSD / equity) * 100.0;
-               outResult.houseMoneyApplied = (houseMoneyBonusUSD > 0.0);
-              }
+         baseRiskUSD    = equity * (effectiveRiskPct / 100.0);
+         riskCapitalUSD = baseRiskUSD;
+
+         // House-Money Profit Buffer Accelerator when DD < 1.00% and 0 real losses today
+         double hwmBufferUSD = MathMax(weeklyProfitUSD, (currentTotalDDPct < 0.35 ? equity * 0.010 : 0.0));
+         if(!dampenerActive && hwmBufferUSD > 0.0 && currentTotalDDPct < 1.00 && lossesToday == 0 &&
+            dailyPnLUSD >= -dailyScratchFloorUSD && (isTier1Signal || onnxWinProbability >= 0.66))
+           {
+            double share      = isTier1Signal ? GROWTH_HOUSE_MONEY_SHARE : (GROWTH_HOUSE_MONEY_SHARE * 0.50);
+            double maxRiskPct = isTier1Signal ? GROWTH_MAX_EFFECTIVE_RISK_PCT : 1.65;
+            houseMoneyBonusUSD = share * hwmBufferUSD;
+            double maxAllowedCapitalUSD = equity * (maxRiskPct / 100.0);
+
+            if((baseRiskUSD + houseMoneyBonusUSD) > maxAllowedCapitalUSD)
+               houseMoneyBonusUSD = MathMax(0.0, maxAllowedCapitalUSD - baseRiskUSD);
+
+            riskCapitalUSD              = baseRiskUSD + houseMoneyBonusUSD;
+            effectiveRiskPct            = (riskCapitalUSD / equity) * 100.0;
+            outResult.houseMoneyApplied = (houseMoneyBonusUSD > 0.0);
            }
 
          // Hard Cap: Never allow a single stop-out to breach remaining daily drawdown capacity
          double remDailyDDPct = m_equityGuard.GetRemainingDailyDrawdownCapacityPct();
-         double maxDailyRiskPct = MathMin(GROWTH_MAX_REMAINING_DD_CAP_PCT, MathMax(0.0, remDailyDDPct - 0.20) * 0.75);
+         double maxDailyRiskPct = (lossesToday == 0 && dailyPnLUSD >= -dailyScratchFloorUSD)
+                                  ? MathMin(GROWTH_MAX_REMAINING_DD_CAP_PCT, remDailyDDPct * 0.90)
+                                  : MathMin(GROWTH_MAX_REMAINING_DD_CAP_PCT, MathMax(0.0, remDailyDDPct - 0.15) * 0.60);
          double dayStartRef = m_equityGuard.GetDayStartReference();
          double maxDailyRiskUSD = (dayStartRef > 0.0 ? dayStartRef : equity) * (maxDailyRiskPct / 100.0);
 
@@ -276,7 +273,7 @@ public:
       double dayRef      = m_equityGuard.GetDayStartReference();
       double dailyScratchFloor = (dayRef > 0.0 ? dayRef * 0.0015 : 5.0);
       double safeDailyPct = (m_equityGuard.GetConsecutiveLossesToday() == 0 && m_equityGuard.GetDailyRealizedPnLUSD() >= -dailyScratchFloor)
-                            ? (remDailyPct * 0.88)
+                            ? (remDailyPct * 0.90)
                             : MathMax(0.0, (remDailyPct - 0.15) * 0.55);
       double safeDailyCapUSD = (dayRef > 0.0 ? dayRef : equity) * (safeDailyPct / 100.0);
       if(riskCapitalUSD > safeDailyCapUSD)

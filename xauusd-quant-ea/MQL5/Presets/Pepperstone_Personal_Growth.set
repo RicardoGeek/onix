@@ -1,0 +1,36 @@
+;====================================================================
+; XAUUSD_Sniper_ONNX v4.00 — PEPPERSTONE PERSONAL GROWTH PRESET
+; - Mode: MODE_ASYMMETRIC_GROWTH (1)
+; - Compounding: 1.10% Tier 2 / 1.92% Tier 1 + 40% House-Money Bonus
+;   (up to 2.15% effective risk when near High-Water Mark)
+; - Daily Breaker: 2.40% | Total Breaker: 5.40%
+; - Timezone: Auto-detected live via TimeGMT() (GMT+2 Winter / GMT+3 DST)
+;====================================================================
+InpRiskMode=1
+InpDrawdownType=0
+InpCommissionPerLotRoundTurn=7.0
+InpPropTier2RiskPct=1.05
+InpPropTier1RiskPct=1.88
+InpGrowthTier2RiskPct=1.10
+InpGrowthTier1RiskPct=1.92
+InpUseOnnxModel=true
+InpOnnxTier2Threshold=0.58
+InpOnnxTier1Threshold=0.72
+InpBrokerGMTOffsetHours=2
+InpVPBinSizeUSD=0.25
+InpMinSweepAtrRatio=0.15
+InpMaxSweepAtrRatio=0.65
+InpMinAbsorptionVolRatio=1.50
+InpMaxReclaimBarsM5=3
+InpLimitExpiryBarsM5=3
+InpEnableVerticalTimeBarrier=true
+InpVerticalBarrierHours=4
+InpEnableCalendarFilter=true
+InpMaxSpreadMultiplier=1.80
+InpHardMaxSpreadUSD=0.80
+InpMagicNumber=20260888
+InpMaxSlippagePoints=30
+InpEnableCsvTelemetry=true
+InpCsvUseCommonFolder=true
+InpLogLevel=1
+InpShowChartHUD=true

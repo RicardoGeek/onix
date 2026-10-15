@@ -53,13 +53,13 @@
 #define PROP_DAILY_PROFIT_LOCK_PCT       5.20
 
 //--- Mode B (Asymmetric Growth) Risk Parameters
-#define GROWTH_TIER2_RISK_PCT            1.00
-#define GROWTH_TIER1_RISK_PCT            1.65
+#define GROWTH_TIER2_RISK_PCT            1.10
+#define GROWTH_TIER1_RISK_PCT            1.92
 #define GROWTH_HOUSE_MONEY_SHARE         0.40
-#define GROWTH_MAX_EFFECTIVE_RISK_PCT    1.95
-#define GROWTH_MAX_REMAINING_DD_CAP_PCT  1.95
+#define GROWTH_MAX_EFFECTIVE_RISK_PCT    2.15
+#define GROWTH_MAX_REMAINING_DD_CAP_PCT  2.15
 #define GROWTH_DD_DAMPENER_TRIGGER_PCT   2.50
-#define GROWTH_DD_DAMPENER_CLAMP_PCT     0.55
+#define GROWTH_DD_DAMPENER_CLAMP_PCT     0.65
 
 //+------------------------------------------------------------------+
 //| System Enumerations                                              |

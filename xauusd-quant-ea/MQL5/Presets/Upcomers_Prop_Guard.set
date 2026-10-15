@@ -1,0 +1,36 @@
+;====================================================================
+; XAUUSD_Sniper_ONNX v4.00 — UPCOMERS PROP FIRM PRESET (Prop Guard)
+; - Mode: MODE_PROP_GUARD (0)
+; - Daily Breaker: 2.25% (Hard Ceiling < 3.00% vs max(Balance, Equity))
+; - Total Breaker: 5.20% Trailing High-Water Mark (Hard Ceiling < 6.00%)
+; - Lot Sizing: OrderCalcProfit() + 3-Layer Anti-10x Prop Guard
+; - Timezone: Auto-detected live via TimeGMT() (Fallback = UTC+1)
+;====================================================================
+InpRiskMode=0
+InpDrawdownType=0
+InpCommissionPerLotRoundTurn=7.0
+InpPropTier2RiskPct=1.05
+InpPropTier1RiskPct=1.88
+InpGrowthTier2RiskPct=1.10
+InpGrowthTier1RiskPct=1.92
+InpUseOnnxModel=true
+InpOnnxTier2Threshold=0.58
+InpOnnxTier1Threshold=0.72
+InpBrokerGMTOffsetHours=1
+InpVPBinSizeUSD=0.25
+InpMinSweepAtrRatio=0.15
+InpMaxSweepAtrRatio=0.65
+InpMinAbsorptionVolRatio=1.50
+InpMaxReclaimBarsM5=3
+InpLimitExpiryBarsM5=3
+InpEnableVerticalTimeBarrier=true
+InpVerticalBarrierHours=4
+InpEnableCalendarFilter=true
+InpMaxSpreadMultiplier=1.80
+InpHardMaxSpreadUSD=0.80
+InpMagicNumber=20260777
+InpMaxSlippagePoints=30
+InpEnableCsvTelemetry=true
+InpCsvUseCommonFolder=true
+InpLogLevel=1
+InpShowChartHUD=true
