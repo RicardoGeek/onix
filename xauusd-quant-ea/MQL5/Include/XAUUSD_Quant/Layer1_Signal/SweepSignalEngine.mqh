@@ -208,9 +208,9 @@ private:
          double bestLowerWickRatio = MathMax(lowerWick / bar0Range,
                                              m_tracker.sweepBarWickUSD / MathMax(0.01, m_tracker.sweepBarRangeUSD));
 
-         // In Early London (06:30-09:59 UTC), internal M15_SWING_LOW requires a strong pinbar rejection wick (>= 55%)
+         // In Early London (06:30-09:59 UTC), internal M15_SWING_LOW requires a strong rejection wick (>= 45%)
          // so we don't buy minor internal liquidity on the way down to sweep ASIAN_LOW / PDL
-         if(m_tracker.poolType == LIQ_M15_SWING_LOW && dtUTC.hour <= 9 && bestLowerWickRatio < 0.55)
+         if(m_tracker.poolType == LIQ_M15_SWING_LOW && dtUTC.hour <= 9 && bestLowerWickRatio < 0.45)
             return false;
 
          // If fading a confirmed H1/H4 Bearish trend, require strong rejection wick >= 50% and M5 close above bar[1].high
@@ -804,7 +804,7 @@ public:
          // Condition B: Sweep or reclaim bar exhibits institutional volume participation (ONNX weighs exact f3_rel_tick_volume)
          double maxVolObserved = MathMax(m_tracker.sweepBarTickVol, closedVol);
          double relTickVolume  = maxVolObserved / MathMax(1.0, m_tracker.sma20TickVol);
-         bool   hasAbsorption  = (relTickVolume >= 1.15);
+         bool   hasAbsorption  = (relTickVolume >= 1.05);
 
          // Condition C: Minor Market Structure Shift (MSS) + 3-Candle FVG or clean VAH/VAL reclaim
          bool   hasFVG      = false;

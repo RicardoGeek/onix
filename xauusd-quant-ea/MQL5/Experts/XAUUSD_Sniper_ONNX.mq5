@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Principal Quantitative Systems Engineering"
 #property link      "https://www.mql5.com"
-#property version   "4.10"
+#property version   "4.20"
 #property description "XAUUSD Institutional Liquidity Sweep + M1 Volume Profile + Native ONNX Meta-Labeling EA"
 #property description "Strict Single-Position Sniper Execution | 3.0% Daily / 6.0% Total Drawdown Hard Ceiling"
 #property strict

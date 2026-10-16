@@ -13,7 +13,7 @@
 //+------------------------------------------------------------------+
 //| Global System & Mathematical Constants                           |
 //+------------------------------------------------------------------+
-#define QUANT_EA_VERSION                 "4.10"
+#define QUANT_EA_VERSION                 "4.20"
 #define QUANT_DEFAULT_MAGIC              20260401
 #define QUANT_EPSILON                    1e-9
 #define ONNX_FEATURE_COUNT               12

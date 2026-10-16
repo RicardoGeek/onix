@@ -1,5 +1,5 @@
 ;====================================================================
-; XAUUSD_Sniper_ONNX v4.10 — UPCOMERS PROP FIRM PRESET (Prop Guard)
+; XAUUSD_Sniper_ONNX v4.20 — UPCOMERS PROP FIRM PRESET (Prop Guard)
 ; - Mode: MODE_PROP_GUARD (0)
 ; - Consistency Guard: Tier-2 = 1.05% / Tier-1 = 1.35% (keeps single
 ;   TP2 runner < 15-18% of quarterly profit for 20% Best-Trade Rule)
