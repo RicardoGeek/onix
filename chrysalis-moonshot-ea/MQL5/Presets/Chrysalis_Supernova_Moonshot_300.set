@@ -1,0 +1,27 @@
+; Chrysalis v2.00 ? Supernova Moonshot Edition ( -> .65M Config)
+; Attach to XAUUSD M15 (or M5) on a high-leverage personal account (1:500 / 1:1000)
+InpRun5=true
+InpRun6=true
+InpRun7=true
+InpRun8=true
+InpRun9=true
+InpFixLot=0.0
+InpLotStep=0.01
+InpBalanceStep=300.0
+InpMaxPositions=6
+InpStopDist=10.0
+InpAllowOpposite=false
+InpSkipHour11=true
+InpCalibrateS7S9=true
+InpStage2Ratchet=true
+InpUseParachute=true
+InpParachuteDDPct=26.0
+InpParachuteMult=1.25
+InpPropMode=false
+InpPropStart=0.0
+InpPropDailyPct=3.0
+InpPropMaxPct=6.0
+InpPropBufferPct=0.5
+InpSizeFromStart=true
+InpMagicNumber=777500
+InpShowHUD=true
