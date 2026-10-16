@@ -18,10 +18,12 @@ This document contains the complete system context, Windows VM paths, architectu
 - **MetaTrader 5 Executables**:
   - Primary Terminal: `C:\Program Files\Pepperstone MetaTrader 5\terminal64.exe`
   - Primary Compiler: `C:\Program Files\Pepperstone MetaTrader 5\MetaEditor64.exe`
-  - Secondary Terminal: `C:\Program Files\MetaTrader 5\terminal64.exe`
+  - Secondary Terminal (Upcomers): `C:\Program Files\MetaTrader 5\terminal64.exe`
+  - GetLeveraged Terminal: `C:\Program Files\GetLeveraged MT5 Terminal\terminal64.exe`
 - **MetaTrader 5 Terminal Data Folders (`%APPDATA%\MetaQuotes\Terminal\`)**:
   - Primary (Pepperstone): `C:\Users\faker\AppData\Roaming\MetaQuotes\Terminal\73B7A2420D6397DFF9014A20F1201F97`
-  - Default MT5: `C:\Users\faker\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075`
+  - Default MT5 (Upcomers): `C:\Users\faker\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075`
+  - GetLeveraged MT5: `C:\Users\faker\AppData\Roaming\MetaQuotes\Terminal\99B22614732346ADC2C7FD4EA1646D37`
   - BreakFree Lab: `C:\Users\faker\AppData\Roaming\MetaQuotes\Terminal\32B1B264C2ABDCF82237DF1469803C70`
   - MT5 Tests: `C:\Users\faker\AppData\Roaming\MetaQuotes\Terminal\F0A0D5F097CACFBD0434000E2EB7B106`
   - Shared Common Files: `C:\Users\faker\AppData\Roaming\MetaQuotes\Terminal\Common\Files`
@@ -96,12 +98,12 @@ This document contains the complete system context, Windows VM paths, architectu
   - Define `scratchFloorUSD = dayStartReference * 0.0015` (`0.15%` of day-start equity). Only real stop-outs exceeding `-scratchFloorUSD` increment `m_consecutiveLossesToday` or trigger the intraday post-loss clamp.
 
 ### Lesson 7: Layer 1 Structural Filters & Multi-Stage Runner Ratchet
-- **Layer 1 Signal Filters (`SweepSignalEngine.mqh`)**:
-  - Active killzones: London (`06:30–10:55 UTC`) and New York (`12:00–15:55 UTC`).
-  - `SIGNAL_SHORT` is restricted to `LIQ_EQUAL_HIGHS` (exhaustion double-tops); counter-trend shorts against single levels in secular Gold bull regimes are blocked.
-  - Low-wick M15 fractal sweeps (`wick_body_ratio < 0.55` during `06:00–09:59 UTC` or `14:20–14:59 UTC`) and `LIQ_EXTERNAL_LVN_LOW` longs are filtered out.
+- **Layer 1 Signal Filters (`SweepSignalEngine.mqh` & `SessionLevels.mqh`)**:
+  - Active continuous killzones: London & Pre-NY Overlap (`06:00–11:59 UTC`) and New York & London Close (`12:00–16:45 UTC`).
+  - `SIGNAL_SHORT` is allowed on `LIQ_EQUAL_HIGHS`, `LIQ_PDH`, and `LIQ_ASIAN_HIGH` (requiring `wick_body_ratio >= 0.42` and break of prior M5 low when H1/H4 trend is bullish), plus `LIQ_M15_SWING_HIGH` when H1/H4 is bearish/neutral. Strictly single-position (`HasActiveExposure()` blocks any concurrent trade — zero hedging).
+  - Low-wick M15 fractal sweeps (`wick_body_ratio < 0.38` during `06:00–09:59 UTC` or `14:20–14:59 UTC`) and `LIQ_EXTERNAL_LVN_LOW` longs are filtered out.
 - **Layer 3 Multi-Stage Ratchet (`ExecutionManager.mqh`)**:
-  - Instant execution when limit price is within `$0.85` of market ask/bid; stale pending orders cancel after `15` minutes (`3` M5 bars) or if price runs `+1.50R` away before fill.
+  - Instant Market execution when entry price is within `MathMax($1.65, 0.45 * slDistanceUSD)` of live ask/bid (and `maxImmediateSL` up to `2.65 * ATR_M5` in `SweepSignalEngine.mqh`), preventing V-bottom/V-top rockets from leaving behind unfilled limit orders; stale pending orders cancel after `15` minutes (`3` M5 bars) or if price runs `+1.50R` away before fill.
   - **`+0.62R`**: Close `35%` at `TP1` and tighten runner SL to `-0.30R`.
   - **`+0.95R`**: Move runner SL to `+0.10R` (Breakeven + Commission).
   - **`+1.32R`**: Lock **`+0.38R`** (captures 2024-style tighter range swings that peak around `+1.35R–1.60R`).

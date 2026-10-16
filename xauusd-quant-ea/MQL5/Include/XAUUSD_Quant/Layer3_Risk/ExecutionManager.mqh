@@ -72,7 +72,7 @@ private:
          tickSize = (point > 0.0 ? point : 0.01);
       long   stopsLevel = SymbolInfoInteger(m_symbol, SYMBOL_TRADE_STOPS_LEVEL);
       long   freezeLvl  = SymbolInfoInteger(m_symbol, SYMBOL_TRADE_FREEZE_LEVEL);
-      double minDist    = MathMax((double)MathMax(stopsLevel, freezeLvl) * point, 2.0 * tickSize);
+      double minDist    = MathMax((double)MathMax(stopsLevel, freezeLvl) * point, MathMax(0.35, 3.0 * tickSize));
 
       double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
       double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
@@ -396,9 +396,11 @@ public:
          lots = NormalizeSymbolLots(m_symbol, MathMax(minVol, clampedLots));
         }
 
+      double maxMarketSlipUSD = MathMax(1.65, 0.45 * setup.slDistanceUSD);
+
       if(setup.direction == SIGNAL_LONG)
         {
-         if(MathAbs(ask - entryPrice) <= 0.85)
+         if(MathAbs(ask - entryPrice) <= maxMarketSlipUSD)
            {
             entryPrice = NormalizeSymbolPrice(m_symbol, ask);
             slPrice    = NormalizeSymbolPrice(m_symbol, entryPrice - setup.slDistanceUSD);
@@ -415,7 +417,7 @@ public:
         }
       else if(setup.direction == SIGNAL_SHORT)
         {
-         if(MathAbs(entryPrice - bid) <= 0.85)
+         if(MathAbs(entryPrice - bid) <= maxMarketSlipUSD)
            {
             entryPrice = NormalizeSymbolPrice(m_symbol, bid);
             slPrice    = NormalizeSymbolPrice(m_symbol, entryPrice + setup.slDistanceUSD);
