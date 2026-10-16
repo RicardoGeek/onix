@@ -1,16 +1,18 @@
 ;====================================================================
 ; XAUUSD_Sniper_ONNX v4.10 — UPCOMERS PROP FIRM PRESET (Prop Guard)
 ; - Mode: MODE_PROP_GUARD (0)
+; - Consistency Guard: Tier-2 = 1.05% / Tier-1 = 1.35% (keeps single
+;   TP2 runner < 15-18% of quarterly profit for 20% Best-Trade Rule)
 ; - Daily Breaker: 2.25% (Hard Ceiling < 3.00% vs max(Balance, Equity))
 ; - Total Breaker: 5.20% Trailing High-Water Mark (Hard Ceiling < 6.00%)
-; - Lot Sizing: OrderCalcProfit() + 3-Layer Anti-10x Prop Guard
+; - Lot Sizing: OrderCalcProfit() + OrderCheck() 1:30 Margin Clamp
 ; - Timezone: Auto-detected live via TimeGMT() (Fallback = UTC+1)
 ;====================================================================
 InpRiskMode=0
 InpDrawdownType=0
 InpCommissionPerLotRoundTurn=7.0
 InpPropTier2RiskPct=1.05
-InpPropTier1RiskPct=1.88
+InpPropTier1RiskPct=1.35
 InpGrowthTier2RiskPct=1.10
 InpGrowthTier1RiskPct=1.92
 InpUseOnnxModel=true
