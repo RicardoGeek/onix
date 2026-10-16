@@ -99,11 +99,11 @@ This document contains the complete system context, Windows VM paths, architectu
 
 ### Lesson 7: Layer 1 Structural Filters & Multi-Stage Runner Ratchet
 - **Layer 1 Signal Filters (`SweepSignalEngine.mqh` & `SessionLevels.mqh`)**:
-  - Active continuous killzones: London & Pre-NY Overlap (`06:00–11:59 UTC`) and New York & London Close (`12:00–16:45 UTC`).
-  - `SIGNAL_SHORT` is allowed on `LIQ_EQUAL_HIGHS`, `LIQ_PDH`, and `LIQ_ASIAN_HIGH` (requiring `wick_body_ratio >= 0.42` and break of prior M5 low when H1/H4 trend is bullish), plus `LIQ_M15_SWING_HIGH` when H1/H4 is bearish/neutral. Strictly single-position (`HasActiveExposure()` blocks any concurrent trade — zero hedging).
-  - Low-wick M15 fractal sweeps (`wick_body_ratio < 0.38` during `06:00–09:59 UTC` or `14:20–14:59 UTC`) and `LIQ_EXTERNAL_LVN_LOW` longs are filtered out.
+  - Active killzones: London (`06:30–10:55 UTC`) and New York (`12:00–15:55 UTC`), with Asian range completion at `06:30 UTC` (in-distribution with `xauusd_meta_model.onnx`).
+  - `SIGNAL_SHORT` is allowed only on `LIQ_EQUAL_HIGHS` (or `LIQ_M15_SWING_HIGH` when H1/H4 is bearish/neutral). Strictly single-position (`HasActiveExposure()` blocks any concurrent trade — zero hedging).
+  - Low-wick M15 fractal sweeps (`wick_body_ratio < 0.38` during `06:30–09:59 UTC` or `14:20–14:59 UTC`) and `LIQ_EXTERNAL_LVN_LOW` longs are filtered out.
 - **Layer 3 Multi-Stage Ratchet (`ExecutionManager.mqh`)**:
-  - Instant Market execution when entry price is within `MathMax($1.65, 0.45 * slDistanceUSD)` of live ask/bid (and `maxImmediateSL` up to `2.65 * ATR_M5` in `SweepSignalEngine.mqh`), preventing V-bottom/V-top rockets from leaving behind unfilled limit orders; stale pending orders cancel after `15` minutes (`3` M5 bars) or if price runs `+1.50R` away before fill.
+  - Instant Market execution when entry price is within `maxMarketSlipUSD = MathMax($0.85, 0.22 * slDistanceUSD)` of live ask/bid (preserving exact `$0.85` pullback limit geometry in 2024–2025 while scaling up to `$1.10–$1.94` in `$4,500+` 2026 Gold so high-conviction V-reversals do not run away unfilled); stale pending orders cancel after `15` minutes (`3` M5 bars) or if price runs `+1.50R` away before fill.
   - **`+0.62R`**: Close `35%` at `TP1` and tighten runner SL to `-0.30R`.
   - **`+0.95R`**: Move runner SL to `+0.10R` (Breakeven + Commission).
   - **`+1.32R`**: Lock **`+0.38R`** (captures 2024-style tighter range swings that peak around `+1.35R–1.60R`).
@@ -129,6 +129,14 @@ This document contains the complete system context, Windows VM paths, architectu
 - **Problem**: On Upcomers (`1:30` account leverage + additional symbol margin multiplier on XAUUSD, requiring `~$83,000` margin per `1.00` lot at `$4,500` Gold), passing `ORDER_TYPE_BUY_LIMIT` / `ORDER_TYPE_SELL_LIMIT` to `OrderCalcMargin()` returns **`$0.00` required margin** because `SYMBOL_MARGIN_LIMIT` is `0.0` (pending orders do not consume margin until filled). As a result, `PositionSizer.mqh` did not scale down `1.00+` lot trades to fit inside `$50,000` free margin, causing every market order and triggered limit order to fail with `10019 (not enough money)`.
 - **Solution Implemented in `PositionSizer.mqh` & `ExecutionManager.mqh`**:
   - Always evaluate margin using the **market deal order type (`ORDER_TYPE_BUY` / `ORDER_TYPE_SELL`)** via **both** `OrderCalcMargin(calcOrderType, ...)` AND `OrderCheck(simReq, simRes)` (`TRADE_ACTION_DEAL`), taking `MathMax(calcMargin, simRes.margin)` and automatically clamping `finalLots` to fit within `85%–88%` of `ACCOUNT_MARGIN_FREE`.
+
+### Lesson 11: Same-Tick Exit Race Condition & Mid-Bar Post-Exit Guard (`ExecutionManager.mqh` & `SweepSignalEngine.mqh`)
+- **Problem**:
+  1. When an open position closes mid-bar (e.g., at `15:21:40` on `2024-09-06` NFP Friday), if `m_lastEvaluatedM5BarTime` was not updated at `15:20:00` while the trade was open, `EvaluateOnM5BarClose()` immediately runs mid-bar (`100` seconds late!) on the exact same tick the position closed.
+  2. Furthermore, if `OnTick()` places a new pending limit order on the same tick that a prior position closed, MT5 fires `OnTradeTransaction(TRADE_TRANSACTION_DEAL_ADD)` for the old position's exit deal *after* `OnTick()`, and calling `m_ctx.Reset()` wipes `m_ctx.hasPendingOrder = true` while the new pending order is still live on the broker.
+- **Solution Implemented**:
+  - In `SweepSignalEngine.mqh` (`NotifyPendingOrderState()`), update `m_lastEvaluatedM5BarTime = iTime(m_symbol, PERIOD_M5, 0)` whenever `hasPendingOrOpenTrade` is `true`, ensuring that a mid-bar trade exit always waits for the next clean M5 bar close.
+  - In `ExecutionManager.mqh` (`SyncBrokerState()` and `OnTradeTransaction()`), explicitly re-adopt live pending orders (`else if(foundOrderTicket > 0 && foundPosTicket == 0)`) and guard `m_ctx.Reset()` with `if(!m_ctx.hasPendingOrder)` followed by `SyncBrokerState()`.
 
 ---
 

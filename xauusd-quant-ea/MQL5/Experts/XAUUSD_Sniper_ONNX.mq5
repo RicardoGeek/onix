@@ -39,16 +39,16 @@ input double         InpGrowthTier1RiskPct        = 1.92;               // Growt
 
 input group "=== [2] LAYER 2: NATIVE ONNX META-LABELER ==="
 input bool           InpUseOnnxModel              = true;               // Enable Native ONNX Model (false = Deterministic / Data Export)
-input double         InpOnnxTier2Threshold        = 0.52;               // Minimum ONNX Win Probability Threshold (Tier 2)
-input double         InpOnnxTier1Threshold        = 0.70;               // High-Conviction ONNX Win Probability (Tier 1)
+input double         InpOnnxTier2Threshold        = 0.58;               // Minimum ONNX Win Probability Threshold (Tier 2)
+input double         InpOnnxTier1Threshold        = 0.72;               // High-Conviction ONNX Win Probability (Tier 1)
 
 input group "=== [3] LAYER 1: SWEEP & VOLUME PROFILE ENGINE ==="
 input int            InpBrokerGMTOffsetHours      = 2;                  // Tester Fallback GMT Offset (Live/VPS Auto-Detects via TimeGMT)
 input double         InpVPBinSizeUSD              = 0.25;               // Intraday M1 Volume Profile Bin Width ($0.25)
-input double         InpMinSweepAtrRatio          = 0.12;               // Minimum Liquidity Sweep Depth (x ATR_M15)
-input double         InpMaxSweepAtrRatio          = 0.80;               // Maximum Liquidity Sweep Depth (x ATR_M15)
-input double         InpMinAbsorptionVolRatio     = 0.90;               // Minimum Tick Volume Absorption (x SMA20)
-input int            InpMaxReclaimBarsM5          = 4;                  // Maximum M5 Bars Allowed for Level Reclaim
+input double         InpMinSweepAtrRatio          = 0.15;               // Minimum Liquidity Sweep Depth (x ATR_M15)
+input double         InpMaxSweepAtrRatio          = 0.65;               // Maximum Liquidity Sweep Depth (x ATR_M15)
+input double         InpMinAbsorptionVolRatio     = 1.50;               // Minimum Tick Volume Absorption (x SMA20)
+input int            InpMaxReclaimBarsM5          = 3;                  // Maximum M5 Bars Allowed for Level Reclaim
 input int            InpLimitExpiryBarsM5         = 3;                  // Pending Sniper Limit Expiry (M5 Bars = 15m)
 input bool           InpEnableVerticalTimeBarrier = true;               // Enforce 4-Hour Vertical Time Barrier on Open Trades
 input int            InpVerticalBarrierHours      = 4;                  // Vertical Time Barrier Duration (Hours)

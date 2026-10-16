@@ -118,7 +118,7 @@ private:
       dtUTC.min  = 0;
       dtUTC.sec  = 0;
       datetime todayStartUTC = StructToTime(dtUTC);
-      datetime asianEndUTC   = todayStartUTC + 6 * 3600; // 06:00 UTC
+      datetime asianEndUTC   = todayStartUTC + 6 * 3600 + 30 * 60; // 06:30 UTC
 
       if(todayStartUTC != m_currentDayStartUTC)
         {
@@ -449,16 +449,16 @@ public:
       if(minOfDay >= (20 * 60 + 55) && minOfDay <= (22 * 60 + 10))
          return SESSION_ROLLOVER_BLACKOUT;
 
-      // Asian Session Accumulation: 00:00 - 06:00 UTC (0 - 359)
-      if(minOfDay >= 0 && minOfDay < (6 * 60))
+      // Asian Session Accumulation: 00:00 - 06:30 UTC (0 - 389)
+      if(minOfDay >= 0 && minOfDay < (6 * 60 + 30))
          return SESSION_ASIAN_ACCUMULATION;
 
-      // London Killzone & Pre-NY Overlap: 06:00 - 11:59 UTC (360 - 719)
-      if(minOfDay >= (6 * 60) && minOfDay < (12 * 60))
+      // London Killzone: 06:30 - 10:55 UTC (390 - 655)
+      if(minOfDay >= (6 * 60 + 30) && minOfDay <= (10 * 60 + 55))
          return SESSION_LONDON_KILLZONE;
 
-      // New York Killzone & London Close: 12:00 - 16:45 UTC (720 - 1005)
-      if(minOfDay >= (12 * 60) && minOfDay <= (16 * 60 + 45))
+      // New York Killzone: 12:00 - 15:55 UTC (720 - 955)
+      if(minOfDay >= (12 * 60) && minOfDay <= (15 * 60 + 55))
          return SESSION_NY_KILLZONE;
 
       return SESSION_OUTSIDE_KILLZONE;

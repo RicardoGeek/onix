@@ -72,7 +72,7 @@ private:
          tickSize = (point > 0.0 ? point : 0.01);
       long   stopsLevel = SymbolInfoInteger(m_symbol, SYMBOL_TRADE_STOPS_LEVEL);
       long   freezeLvl  = SymbolInfoInteger(m_symbol, SYMBOL_TRADE_FREEZE_LEVEL);
-      double minDist    = MathMax((double)MathMax(stopsLevel, freezeLvl) * point, MathMax(0.35, 3.0 * tickSize));
+      double minDist    = MathMax((double)MathMax(stopsLevel, freezeLvl) * point, 2.0 * tickSize);
 
       double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
       double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
@@ -301,6 +301,13 @@ public:
             m_ctx.remainingLots          = m_posInfo.Volume();
            }
         }
+      else if(foundOrderTicket > 0 && foundPosTicket == 0)
+        {
+         // Ensure live pending order is tracked even if OnTradeTransaction cleared context on same-tick exit
+         m_ctx.hasPendingOrder    = true;
+         m_ctx.hasOpenPosition    = false;
+         m_ctx.pendingOrderTicket = foundOrderTicket;
+        }
       else if(foundPosTicket == 0 && foundOrderTicket == 0)
         {
          if(m_ctx.hasPendingOrder || m_ctx.hasOpenPosition)
@@ -396,7 +403,7 @@ public:
          lots = NormalizeSymbolLots(m_symbol, MathMax(minVol, clampedLots));
         }
 
-      double maxMarketSlipUSD = MathMax(1.65, 0.45 * setup.slDistanceUSD);
+      double maxMarketSlipUSD = MathMax(0.85, 0.22 * setup.slDistanceUSD);
 
       if(setup.direction == SIGNAL_LONG)
         {
@@ -862,7 +869,9 @@ public:
            }
 
          m_accumulatedRealizedPnL = 0.0;
-         m_ctx.Reset();
+         if(!m_ctx.hasPendingOrder)
+            m_ctx.Reset();
+         SyncBrokerState();
         }
      }
 
