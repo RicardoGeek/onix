@@ -1,5 +1,5 @@
 ;====================================================================
-; XAUUSD_Sniper_ONNX v4.00 — UPCOMERS PROP FIRM PRESET (Prop Guard)
+; XAUUSD_Sniper_ONNX v4.10 — UPCOMERS PROP FIRM PRESET (Prop Guard)
 ; - Mode: MODE_PROP_GUARD (0)
 ; - Daily Breaker: 2.25% (Hard Ceiling < 3.00% vs max(Balance, Equity))
 ; - Total Breaker: 5.20% Trailing High-Water Mark (Hard Ceiling < 6.00%)
