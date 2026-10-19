@@ -138,6 +138,11 @@ This document contains the complete system context, Windows VM paths, architectu
   - In `SweepSignalEngine.mqh` (`NotifyPendingOrderState()`), update `m_lastEvaluatedM5BarTime = iTime(m_symbol, PERIOD_M5, 0)` whenever `hasPendingOrOpenTrade` is `true`, ensuring that a mid-bar trade exit always waits for the next clean M5 bar close.
   - In `ExecutionManager.mqh` (`SyncBrokerState()` and `OnTradeTransaction()`), explicitly re-adopt live pending orders (`else if(foundOrderTicket > 0 && foundPosTicket == 0)`) and guard `m_ctx.Reset()` with `if(!m_ctx.hasPendingOrder)` followed by `SyncBrokerState()`.
 
+### Lesson 12: Broker Timezone `PERIOD_H4` Candle-Boundary Trap (`GetMacroTrendBias()` in `SweepSignalEngine.mqh`)
+- **Problem**: MT5 anchors `PERIOD_H4` candles to broker server midnight (`00:00, 04:00, 08:00, 12:00, 16:00, 20:00` Server Time). On `UTC+2` brokers (e.g., Upcomers), H4 candles close at `02, 06, 10, 14, 18, 22 UTC`, whereas on `UTC+3` brokers (e.g., GetLeveraged, or Pepperstone during US DST), H4 candles close at `01, 05, 09, 13, 17, 21 UTC`. During a fast sell-off between `13:00–14:00 UTC` (e.g., `2026-10-19`), a `UTC+2` server closes its H4 bar at `14:00 UTC` (`16:00` Server Time) and immediately detects `macroBias == -1` (blocking counter-trend falling-knife longs), whereas a `UTC+3` server is only 1 hour into its `16:00–20:00` Server H4 bar, leaving `h4[0]` frozen at `13:00 UTC` (pre-crash) for another 3 hours!
+- **Solution Implemented in `SweepSignalEngine.mqh` (`v4.21`)**:
+  - `GetMacroTrendBias()` computes the 20-period 4-hour SMA (`sma20H4`) and 5-bar H4 momentum (`h4Close0` vs `h4Close5`) from **rolling closed `PERIOD_H1` bars** (`CopyRates(m_symbol, PERIOD_H1, 1, 84, h1)`, sampling `h1[k * 4].close` for `k = 0..19` and `h1[20].close` for the 20-hour lookback). Because `PERIOD_H1` closes at `:00` of every hour on every broker regardless of GMT offset (`UTC+1`, `UTC+2`, `UTC+3`), macro trend detection is always up-to-the-hour and 100% identical across all brokers.
+
 ---
 
 ## 4. One-Block Restore & Retrain Command Reference

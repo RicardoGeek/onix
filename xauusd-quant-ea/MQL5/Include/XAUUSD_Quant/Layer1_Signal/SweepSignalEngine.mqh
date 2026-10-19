@@ -119,15 +119,15 @@ private:
      }
 
    //--- Compute H1 / H4 Macro Trend Bias (+1 = Bullish, -1 = Bearish, 0 = Neutral) per Clause 1
+   //--- Uses rolling closed PERIOD_H1 bars (84 H1 bars = 21 synthetic 4-hour bars anchored to h1[0])
+   //--- so H4 macro trend is up-to-the-hour and 100% identical across UTC+1, UTC+2, and UTC+3 brokers.
    int                  GetMacroTrendBias() const
      {
-      MqlRates h1[], h4[];
+      MqlRates h1[];
       ArraySetAsSeries(h1, true);
-      ArraySetAsSeries(h4, true);
 
-      int copiedH1 = CopyRates(m_symbol, PERIOD_H1, 1, 34, h1);
-      int copiedH4 = CopyRates(m_symbol, PERIOD_H4, 1, 20, h4);
-      if(copiedH1 < 34 || copiedH4 < 20)
+      int copiedH1 = CopyRates(m_symbol, PERIOD_H1, 1, 84, h1);
+      if(copiedH1 < 80)
          return 0;
 
       double sumH1 = 0.0;
@@ -136,13 +136,16 @@ private:
       double sma34H1 = sumH1 / 34.0;
 
       double sumH4 = 0.0;
-      for(int i = 0; i < 20; i++)
-         sumH4 += h4[i].close;
+      for(int k = 0; k < 20; k++)
+         sumH4 += h1[k * 4].close;
       double sma20H4 = sumH4 / 20.0;
 
-      bool h4Bull = (h4[0].close >= sma20H4);
+      double h4Close0 = h1[0].close;
+      double h4Close5 = h1[20].close;
+
+      bool h4Bull = (h4Close0 >= sma20H4);
       bool h1Bull = (h1[0].close >= sma34H1);
-      bool h4Bear = (h4[0].close < sma20H4 && h4[0].close < h4[5].close);
+      bool h4Bear = (h4Close0 < sma20H4 && h4Close0 < h4Close5);
       bool h1Bear = (h1[0].close < sma34H1 && h1[0].close < h1[8].close);
 
       if(h4Bull || h1Bull)
