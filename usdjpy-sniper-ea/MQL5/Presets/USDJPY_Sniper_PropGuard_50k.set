@@ -1,0 +1,30 @@
+; USDJPY_Sniper_ONNX v1.00 — Prop Firm Guard Preset ($25k-$100k Accounts, 1:100 Leverage)
+; Recommended Timeframe: M5 on USDJPY
+InpRiskMode=0
+InpDrawdownType=0
+InpCommissionPerLotRoundTurn=7.00
+InpPropTier2RiskPct=1.05
+InpPropTier1RiskPct=1.88
+InpGrowthTier2RiskPct=1.10
+InpGrowthTier1RiskPct=1.92
+InpUseOnnxModel=true
+InpOnnxTier2Threshold=0.58
+InpOnnxTier1Threshold=0.72
+InpBrokerGMTOffsetHours=2
+InpVPBinSizeUSD=0.020
+InpMinSweepAtrRatio=0.15
+InpMaxSweepAtrRatio=0.65
+InpMinAbsorptionVolRatio=1.50
+InpMaxReclaimBarsM5=3
+InpLimitExpiryBarsM5=3
+InpEnableVerticalTimeBarrier=true
+InpVerticalBarrierHours=4
+InpEnableCalendarFilter=true
+InpMaxSpreadMultiplier=1.80
+InpHardMaxSpreadUSD=0.035
+InpMagicNumber=20260880
+InpMaxSlippagePoints=30
+InpEnableCsvTelemetry=true
+InpCsvUseCommonFolder=false
+InpLogLevel=1
+InpShowChartHUD=true

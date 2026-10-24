@@ -143,13 +143,23 @@ This document contains the complete system context, Windows VM paths, architectu
 - **Solution Implemented in `SweepSignalEngine.mqh` (`v4.21`)**:
   - `GetMacroTrendBias()` computes the 20-period 4-hour SMA (`sma20H4`) and 5-bar H4 momentum (`h4Close0` vs `h4Close5`) from **rolling closed `PERIOD_H1` bars** (`CopyRates(m_symbol, PERIOD_H1, 1, 84, h1)`, sampling `h1[k * 4].close` for `k = 0..19` and `h1[20].close` for the 20-hour lookback). Because `PERIOD_H1` closes at `:00` of every hour on every broker regardless of GMT offset (`UTC+1`, `UTC+2`, `UTC+3`), macro trend detection is always up-to-the-hour and 100% identical across all brokers.
 
+### Lesson 13: `USDJPY` EA Duo ("The Ninja") — Quote-Currency Risk Conversion, 9-Module Structural Horizons & Carry-Aware Killzones
+- **Directories**:
+  - **9-Module Moonshot EA (`S1–S9`)**: `c:\Users\faker\Documents\dev\onix\usdjpy-moonshot-ea\MQL5\Experts\usdjpy_chrysalis_ea.mq5`
+  - **Controlled-Risk Prop Sniper EA**: `c:\Users\faker\Documents\dev\onix\usdjpy-sniper-ea\MQL5\Experts\USDJPY_Sniper_ONNX.mq5` (`#resource "\\Files\\models\\usdjpy_meta_model.onnx"`)
+- **Key Engineering Invariants on `USDJPY`**:
+  1. **JPY -> USD Contract Risk Floor (`PositionSizer.mqh` & `StopCash()`)**: On `USDJPY`, `1.00` lot has `SYMBOL_TRADE_CONTRACT_SIZE = 100,000 USD`, so a `1.00 JPY` (`100 pip`) price move equals `100,000 JPY`, which in USD account currency is `(contractSize * slDistancePrice) / stopLossPrice` (`~$650 USD` at `154.00`, NOT `$100,000 USD`). Always divide `contractSize * slDistancePrice` by `MathMax(100.0, stopLossPrice)` on `JPY`-quoted FX pairs alongside `OrderCalcProfit()`.
+  2. **9-Module `usdjpy_chrysalis_ea` (`S1–S9`) Structural Horizons**: Sub-daily H1 swing lookbacks (`< 24h`) are intra-session noise on `USDJPY`. All 9 modules (`S1: 24/12`, `S2: 27/13`, `S3: 30/13`, `S4: 34/14`, `S5: 28/13`, `S6: 26/13`, `S7: 28/12`, `S8: 25/13`, `S9: 28/14`) use 24h–34h structural H1 swing horizons with pre-level entry offsets (`0.044%–0.066%`) and active `OrderDelete()` shielding during Exhaustion/WMR Fix hours (`11, 18, 19`) and Judas hours (`3, 4, 8, 9, 12, 17, 18, 20, 21`).
+  3. **Carry-Aware `USDJPY_Sniper_ONNX` Killzones**: Because `USDJPY` has strong positive USD carry drift and momentum breakouts at cash opens (`00:30–02:55`, `07:00–07:55`, `12:00–12:55 UTC`), the Sniper mean-reversion engine operates in the **3 post-impulse reversal windows**: Tokyo Post-Fix (`03:00–04:15 UTC`), London Judas (`06:30–06:55` & `08:00–10:55 UTC`), and NY Post-Data (`13:00–15:55 UTC`), blocking counter-carry `ASIAN_HIGH` / `PDH` short fades.
+
 ---
 
 ## 4. One-Block Restore & Retrain Command Reference
 
 ```powershell
-# 1. Retrain ONNX model from preserved + latest MT5 telemetry
+# 1. Retrain XAUUSD & USDJPY ONNX models from preserved + latest MT5 telemetry
 C:\Users\faker\mlv\Scripts\python.exe "c:\Users\faker\Documents\dev\onix\xauusd-quant-ea\python_pipeline\retrain_multiyear_onnx.py"
+C:\Users\faker\mlv\Scripts\python.exe "c:\Users\faker\Documents\dev\onix\usdjpy-sniper-ea\python_pipeline\train_usdjpy_onnx.py"
 
 # 2. Sync sources & ONNX to Pepperstone MT5 Data Folder and compile
 $repo = "c:\Users\faker\Documents\dev\onix\xauusd-quant-ea"
