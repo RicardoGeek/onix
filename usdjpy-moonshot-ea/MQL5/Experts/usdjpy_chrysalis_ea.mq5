@@ -8,11 +8,11 @@
 //|                                                                  |
 //| Architecture Highlights (v3.10 Ninja 9-Module Marsshot Edition): |
 //|  1. Full 9-Module (S1–S9) Multi-Regime H1 Matrix:                |
-//|     - S1 ( 9/3 ) : Chop Market Milker (Compressed Range 0.28%)   |
-//|     - S2 (19/6 ) : Trend Pullback Follower (Trend Aligned 0.44%) |
+//|     - S1 (22/11) : Chop Market Milker (Compressed Range 0.36%)   |
+//|     - S2 (24/11) : Trend Pullback Follower (Trend Aligned 0.46%) |
 //|     - S3 (30/13) : 30h Structural Bridge Breakout (0.46%)        |
 //|     - S4 (34/14) : 2-Day Macro Yield Wave Runner (0.52%)         |
-//|     - S5 (28/13) : Core Swing Fast Target (0.35%)                |
+//|     - S5 (28/13) : Core Swing Fast Target (0.38%)                |
 //|     - S6 (26/13) : Core Swing 5-Min Rapid Pulse (0.33%)          |
 //|     - S7 (28/12) : Core Swing Deep Wave Runner (0.54%)           |
 //|     - S8 (25/13) : Core Swing Mid-Wave Continuation (0.43%)      |
@@ -37,21 +37,21 @@
 const int    N_MOD         = 9;
 const int    MIN_HOLD_SEC  = 120;     // the EA's own closes and stop moves wait 2 minutes in prop mode
 const int    LOOK_BARS     = 220;     // H1 bars searched for a level
-const int    REFILL_SEC    = 15 * 60; // after a fill, keep re-placing at the level this long
+const int    REFILL_SEC    = 0;       // zero intra-hour duplicate refills in real ticks (1 clean entry per H1 wave)
 
-//--- Full 9-Module Marsshot Matrix (S1 9/3 Chop Milker + S2 19/6 Trend Follower + S3-S9 Multi-Session Breakouts)
+//--- Full 9-Module Marsshot Matrix (S1 22/11 Chop Range Milker + S2 24/11 Trend Follower + S3-S9 Multi-Session Breakouts)
 const int    MOD_ID[9]       = {       1,        2,        3,        4,        5,        6,        7,        8,        9};
 const int    MOD_STYLE[9]    = {       1,        2,        0,        0,        0,        0,        0,        0,        0}; // 1=ChopMilker, 2=TrendFollow, 0=Breakout
-const int    MOD_LEFT[9]     = {       9,       19,       30,       34,       28,       26,       28,       25,       28};
-const int    MOD_RIGHT[9]    = {       3,        6,       13,       14,       13,       13,       12,       13,       14};
-const double MOD_OFF_B_V1[9] = {0.000420, 0.000500, 0.000640, 0.000650, 0.000458, 0.000475, 0.000440, 0.000497, 0.000660};
-const double MOD_OFF_S_V1[9] = {0.000480, 0.000560, 0.000620, 0.000640, 0.000550, 0.000610, 0.000580, 0.000612, 0.000650};
-const double MOD_TP_V1[9]    = {0.002800, 0.004400, 0.004600, 0.005200, 0.003460, 0.003330, 0.005400, 0.004280, 0.005800};
-const double MOD_BE_AT_V1[9] = {0.000900, 0.001000, 0.000920, 0.000930, 0.001000, 0.001180, 0.001120, 0.001180, 0.000920};
-const double MOD_BE_LK_V1[9] = {0.000420, 0.000440, 0.000420, 0.000420, 0.000380, 0.000420, 0.000420, 0.000420, 0.000400};
-const int    MOD_EXP_H[9]    = {      12,       22,       36,       48,       30,       20,       60,       55,       18};
+const int    MOD_LEFT[9]     = {      22,       24,       30,       34,       28,       26,       28,       25,       28};
+const int    MOD_RIGHT[9]    = {      11,       11,       13,       14,       13,       13,       12,       13,       14};
+const double MOD_OFF_B_V1[9] = {0.000580, 0.000600, 0.000640, 0.000650, 0.000580, 0.000475, 0.000590, 0.000497, 0.000660};
+const double MOD_OFF_S_V1[9] = {0.000580, 0.000600, 0.000620, 0.000640, 0.000580, 0.000610, 0.000580, 0.000612, 0.000650};
+const double MOD_TP_V1[9]    = {0.003600, 0.004600, 0.004600, 0.005200, 0.003800, 0.003330, 0.005400, 0.004280, 0.005800};
+const double MOD_BE_AT_V1[9] = {0.000940, 0.000940, 0.000920, 0.000930, 0.000940, 0.001180, 0.000950, 0.001180, 0.000920};
+const double MOD_BE_LK_V1[9] = {0.000420, 0.000440, 0.000420, 0.000420, 0.000420, 0.000420, 0.000420, 0.000420, 0.000400};
+const int    MOD_EXP_H[9]    = {      24,       28,       36,       48,       30,       20,       60,       55,       18};
 const int    MOD_CHECK[9]    = {       5,        5,       15,       15,       15,        5,       15,       15,       15};
-const int    MOD_MAXOPN[9]   = {       3,        4,        5,        6,        7,        5,        5,        9,        8};
+const int    MOD_MAXOPN[9]   = {       5,        5,        5,        6,        7,        5,        5,        9,        8};
 const int    MOD_MAXPND[9]   = {       2,        2,        2,        2,        2,        2,        3,        3,        2};
 
 //--- active runtime module parameters (populated in OnInit)
@@ -199,13 +199,33 @@ void OnTick()
       g_parachute_on = false;
 
    PropGuard();
-   HandleNewPositions();
-   ManagePositions();
-   EnforceCaps();
+
+   static int s_last_pos = -1;
+   int cur_pos = PositionsTotal();
+   if(cur_pos != s_last_pos)
+   {
+      s_last_pos = cur_pos;
+      HandleNewPositions();
+      EnforceCaps();
+   }
+
+   datetime h1 = iTime(_Symbol, PERIOD_H1, 0);
+   if(h1 == 0 || h1 == g_last_h1)
+   {
+      if(InpShowHUD) UpdateHUD();
+      return;
+   }
+   g_last_h1 = h1;
 
    datetime now = TimeCurrent();
    MqlDateTime dt;
    TimeToStruct(now, dt);
+   bool rolloverBlock = (InpSkipRolloverH0 && dt.hour == 0);
+
+   HandleNewPositions();
+   if(!rolloverBlock)
+      ManagePositions();
+   EnforceCaps();
 
    // Exhaustion & WMR 4pm Fix Shield (Server Hours 11, 18, 19)
    bool inExhaustion = (dt.hour == 11 || dt.hour == 18 || dt.hour == 19);
@@ -263,23 +283,18 @@ void OnTick()
       }
    }
 
-   datetime h1 = iTime(_Symbol, PERIOD_H1, 0);
-   if(h1 != 0 && h1 != g_last_h1)
+   long day = (long)h1 / 86400;
+   bool new_day = (day != g_cur_day);
+   g_cur_day = day;
+   for(int m = 0; m < N_MOD; m++)
    {
-      g_last_h1 = h1;
-      long day = (long)h1 / 86400;
-      bool new_day = (day != g_cur_day);
-      g_cur_day = day;
-      for(int m = 0; m < N_MOD; m++)
+      if(!g_run[m]) continue;
+      for(int s = 0; s < 2; s++)
       {
-         if(!g_run[m]) continue;
-         for(int s = 0; s < 2; s++)
-         {
-            double lvl = FindLevel(m, s == 0);
-            if(new_day) { if(g_trig[m][s] < 1) g_trig[m][s] = 1; }
-            else if(lvl > 0.0 && MathAbs(lvl - g_prev_lvl[m][s]) > _Point / 2.0) g_trig[m][s] = 2;
-            g_prev_lvl[m][s] = lvl;
-         }
+         double lvl = FindLevel(m, s == 0);
+         if(new_day) { if(g_trig[m][s] < 1) g_trig[m][s] = 1; }
+         else if(lvl > 0.0 && MathAbs(lvl - g_prev_lvl[m][s]) > _Point / 2.0) g_trig[m][s] = 2;
+         g_prev_lvl[m][s] = lvl;
       }
    }
 
@@ -287,7 +302,6 @@ void OnTick()
    for(int m = 0; m < N_MOD; m++) expired[m] = false;
    ExpireOrders(now, expired);
 
-   bool rolloverBlock = (InpSkipRolloverH0 && dt.hour == 0 && dt.min < 15);
    if(!(InpSkipHour11 && inExhaustion) && !rolloverBlock)
    {
       for(int m = 0; m < N_MOD; m++)
@@ -302,7 +316,7 @@ void OnTick()
             if(s == 1 && InpUseSellShield && inSellJudasHour) continue;
             int why = g_trig[m][s];
             g_trig[m][s] = 0;
-            if(why == 0 && now > g_refill[m][s]) continue;
+            if(why == 0) continue;
             TryPlace(m, s == 0, why);
          }
       }
@@ -357,12 +371,12 @@ bool IsChopMilkerAligned(const bool is_buy)
    double hi12 = h[0], lo12 = l[0];
    for(int i = 1; i < 12; i++) { hi12 = MathMax(hi12, h[i]); lo12 = MathMin(lo12, l[i]); }
    double range12 = hi12 - lo12;
-   // Chop Milker (S1) fires when 12h range is compressed/digesting (0.28 to 1.15 JPY) and aligned with carry
-   if(range12 < 0.28 || range12 > 1.15) return false;
+   // Chop Milker (S1 22/11) fires when 12h range is compressed/digesting (0.30 to 1.65 JPY) and aligned with carry
+   if(range12 < 0.30 || range12 > 1.65) return false;
    double sma24 = 0.0;
    for(int i = 0; i < 24; i++) sma24 += c[i];
    sma24 /= 24.0;
-   return is_buy ? (c[0] >= sma24 - 0.12) : (c[0] <= sma24 - 0.20);
+   return is_buy ? (c[0] >= sma24 - 0.15) : (c[0] <= sma24 - 0.18);
 }
 
 bool IsBuyTrendAligned()
@@ -813,6 +827,26 @@ double OrderLots(const bool is_buy, const double price)
    lots = MathMax(lots, min_lot);
    double max_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    if(max_lot > 0.0) lots = MathMin(lots, max_lot);
+
+   double eq_now  = MathMin(AccountInfoDouble(ACCOUNT_BALANCE), AccountInfoDouble(ACCOUNT_EQUITY));
+   double sl_dist = MathMax(0.20, InpStopDist);
+   double sl_px   = is_buy ? (price - sl_dist) : (price + sl_dist);
+   double risk_1lot = StopCash(is_buy, 1.0, price, sl_px);
+   double step_boost = (!g_parachute_on && eq_now >= 2500.0 && InpLotStep >= 0.02) ? 1.12 : 1.0;
+   if(risk_1lot > 0.0 && eq_now > 0.0 && !InpPropMode)
+   {
+      double max_slot_risk_pct = (g_parachute_on ? 0.032 : 0.048) * step_boost;
+      double max_risk_lots = NormalizeDouble(MathFloor((eq_now * max_slot_risk_pct) / risk_1lot / step) * step, digits);
+      lots = MathMin(lots, MathMax(min_lot, max_risk_lots));
+   }
+   double margin_1lot = 0.0;
+   if(OrderCalcMargin(is_buy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, _Symbol, 1.0, price, margin_1lot) && margin_1lot > 0.0 && eq_now > 0.0)
+   {
+      double max_slot_margin = ((eq_now * 0.88) / MathMax(1, InpMaxPositions - 1)) * step_boost;
+      double max_marg_lots   = NormalizeDouble(MathFloor(max_slot_margin / margin_1lot / step) * step, digits);
+      lots = MathMin(lots, MathMax(min_lot, max_marg_lots));
+   }
+
    double margin = 0.0;
    if(OrderCalcMargin(is_buy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, _Symbol, lots, price, margin) && margin > 0.0)
    {
