@@ -1,4 +1,4 @@
-; Chrysalis Ninja v3.00 — USDJPY 9-Module ($300 Supernova Moonshot Preset)
+; Chrysalis Ninja v3.10 — USDJPY 9-Module ($300 Supernova Marsshot Preset)
 ; Recommended Timeframe: H1 or M15 on USDJPY (all timeframes evaluate H1/M5 internally)
 InpRun1=true
 InpRun2=true
@@ -11,7 +11,7 @@ InpRun8=true
 InpRun9=true
 InpFixLot=0.0
 InpLotStep=0.01
-InpBalanceStep=150.0
+InpBalanceStep=85.0
 InpMaxPositions=9
 InpStopDist=0.65
 InpAllowOpposite=false
@@ -20,8 +20,8 @@ InpSkipRolloverH0=true
 InpUseSellShield=true
 InpStage2Ratchet=true
 InpUseParachute=true
-InpParachuteDDPct=24.0
-InpParachuteMult=1.30
+InpParachuteDDPct=28.0
+InpParachuteMult=1.25
 InpPropMode=false
 InpPropStart=0.0
 InpPropDailyPct=3.0

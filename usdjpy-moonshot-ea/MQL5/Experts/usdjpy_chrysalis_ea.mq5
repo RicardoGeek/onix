@@ -3,33 +3,34 @@
 //|                                  Copyright 2026, Goldie Service |
 //|                                      https://github.com/goldie  |
 //+------------------------------------------------------------------+
-//| CHRYSALIS NINJA v3.00 — USDJPY 9-MODULE SUPERNOVA MOONSHOT       |
-//| Complete S1–S9 Multi-Horizon H1 Swing-Breakout Compounder        |
+//| CHRYSALIS NINJA v3.10 — USDJPY 9-MODULE SUPERNOVA MARSSHOT       |
+//| Chop Milker + Trend Follower + Multi-Horizon Breakout Compounder |
 //|                                                                  |
-//| Architecture Highlights (v3.00 Ninja 9-Module Edition):          |
-//|  1. Full 9-Module (S1–S9) Multi-Horizon H1 Breakout Matrix:      |
-//|     - S1 (24/12) : 24h Daily Pulse Breakout (0.32%)              |
-//|     - S2 (27/13) : Cross-Session Structural Breakout (0.36%)     |
-//|     - S3 (30/13) : 30h Structural Bridge Breakout (0.40%)        |
-//|     - S4 (34/14) : 2-Day Macro Yield Wave Runner (0.48%)         |
+//| Architecture Highlights (v3.10 Ninja 9-Module Marsshot Edition): |
+//|  1. Full 9-Module (S1–S9) Multi-Regime H1 Matrix:                |
+//|     - S1 ( 9/3 ) : Chop Market Milker (Compressed Range 0.28%)   |
+//|     - S2 (19/6 ) : Trend Pullback Follower (Trend Aligned 0.44%) |
+//|     - S3 (30/13) : 30h Structural Bridge Breakout (0.46%)        |
+//|     - S4 (34/14) : 2-Day Macro Yield Wave Runner (0.52%)         |
 //|     - S5 (28/13) : Core Swing Fast Target (0.35%)                |
 //|     - S6 (26/13) : Core Swing 5-Min Rapid Pulse (0.33%)          |
 //|     - S7 (28/12) : Core Swing Deep Wave Runner (0.54%)           |
 //|     - S8 (25/13) : Core Swing Mid-Wave Continuation (0.43%)      |
 //|     - S9 (28/14) : Core Swing Macro Trend Scout (0.58%)          |
-//|  2. USDJPY Pip/Price Geometry & Exact JPY->USD Risk Conversion:  |
-//|     - Hard Stop Distance in JPY (default 0.65 JPY = 65 pips,     |
-//|       risking ~$4.30 per 0.01 lot).                              |
-//|  3. Rollover & Exhaustion Shields:                               |
-//|     - Server Hour 11 London Mid-Morning Exhaustion Shield        |
-//|     - Server Hour 00 Rollover Spread-Widening Guard              |
-//|  4. 2-Stage Runner Profit Ratchet + Equity Drawdown Parachute.   |
+//|  2. 6-Hour Time-Decay Failed-Breakout Shield:                    |
+//|     - Stale breakouts open >= 6h without reaching BE either      |
+//|       scratch at +0.00010 or cut Stop Loss in half (34 pips).    |
+//|  3. Multi-Stage Runner Profit Ratchet:                           |
+//|     - Stage 1: +0.042% BE Lock (~$6.50-$30+ instead of $0.25)    |
+//|     - Stage 2: At 65% of TP -> Lock 36% of TP                    |
+//|     - Stage 3: At 82% of TP -> Lock 60% of TP                    |
+//|  4. Exhaustion/WMR Fix Shield (H11 & H18-19) + Judas Sell Shield |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Goldie Service"
 #property link      "https://github.com/goldie"
-#property version   "3.00"
-#property description "Chrysalis Ninja v3.00 (USDJPY 9-Module Supernova Moonshot Edition) - S1-S9 H1 Breakout Engine."
-#property description "Features 9 Multi-Horizon Modules (S1-S9), Stage-2 Runner Ratchet, Rollover/H11 Shields & Moonshot HUD."
+#property version   "3.10"
+#property description "Chrysalis Ninja v3.10 (USDJPY 9-Module Marsshot Edition) - Chop Milker + Trend Follower + S3-S9 Breakouts."
+#property description "Features S1 Chop Milker, S2 Trend Follower, 6h Time-Decay Shield, 3-Stage Runner Ratchet & Marsshot HUD."
 
 #include <Trade\Trade.mqh>
 
@@ -38,19 +39,20 @@ const int    MIN_HOLD_SEC  = 120;     // the EA's own closes and stop moves wait
 const int    LOOK_BARS     = 220;     // H1 bars searched for a level
 const int    REFILL_SEC    = 15 * 60; // after a fill, keep re-placing at the level this long
 
-//--- Full 9-Module Table (S1..S9) tailored for USDJPY multi-session H1 breakouts (24h-34h structural horizons)
-const int    MOD_ID[9]       = {      1,       2,       3,       4,       5,       6,       7,       8,       9};
-const int    MOD_LEFT[9]     = {     24,      27,      30,      34,      28,      26,      28,      25,      28};
-const int    MOD_RIGHT[9]    = {     12,      13,      13,      14,      13,      13,      12,      13,      14};
-const double MOD_OFF_B_V1[9] = {0.000520, 0.000550, 0.000580, 0.000620, 0.000458, 0.000475, 0.000440, 0.000497, 0.000660};
-const double MOD_OFF_S_V1[9] = {0.000580, 0.000600, 0.000620, 0.000640, 0.000550, 0.000610, 0.000580, 0.000612, 0.000650};
-const double MOD_TP_V1[9]    = {0.003200, 0.003600, 0.004000, 0.004800, 0.003460, 0.003330, 0.005400, 0.004280, 0.005800};
-const double MOD_BE_AT_V1[9] = {0.000950, 0.001020, 0.001050, 0.001080, 0.001000, 0.001180, 0.001120, 0.001180, 0.000920};
-const double MOD_BE_LK_V1[9] = {0.000380, 0.000390, 0.000400, 0.000400, 0.000360, 0.000400, 0.000400, 0.000400, 0.000360};
-const int    MOD_EXP_H[9]    = {     24,      24,      36,      48,      30,      20,      60,      55,      18};
-const int    MOD_CHECK[9]    = {      5,       5,      15,      15,      15,       5,      15,      15,      15};
-const int    MOD_MAXOPN[9]   = {      5,       5,       6,       6,       7,       5,       5,       9,       8};
-const int    MOD_MAXPND[9]   = {      2,       2,       2,       2,       2,       2,       3,       3,       2};
+//--- Full 9-Module Marsshot Matrix (S1 9/3 Chop Milker + S2 19/6 Trend Follower + S3-S9 Multi-Session Breakouts)
+const int    MOD_ID[9]       = {       1,        2,        3,        4,        5,        6,        7,        8,        9};
+const int    MOD_STYLE[9]    = {       1,        2,        0,        0,        0,        0,        0,        0,        0}; // 1=ChopMilker, 2=TrendFollow, 0=Breakout
+const int    MOD_LEFT[9]     = {       9,       19,       30,       34,       28,       26,       28,       25,       28};
+const int    MOD_RIGHT[9]    = {       3,        6,       13,       14,       13,       13,       12,       13,       14};
+const double MOD_OFF_B_V1[9] = {0.000420, 0.000500, 0.000640, 0.000650, 0.000458, 0.000475, 0.000440, 0.000497, 0.000660};
+const double MOD_OFF_S_V1[9] = {0.000480, 0.000560, 0.000620, 0.000640, 0.000550, 0.000610, 0.000580, 0.000612, 0.000650};
+const double MOD_TP_V1[9]    = {0.002800, 0.004400, 0.004600, 0.005200, 0.003460, 0.003330, 0.005400, 0.004280, 0.005800};
+const double MOD_BE_AT_V1[9] = {0.000900, 0.001000, 0.000920, 0.000930, 0.001000, 0.001180, 0.001120, 0.001180, 0.000920};
+const double MOD_BE_LK_V1[9] = {0.000420, 0.000440, 0.000420, 0.000420, 0.000380, 0.000420, 0.000420, 0.000420, 0.000400};
+const int    MOD_EXP_H[9]    = {      12,       22,       36,       48,       30,       20,       60,       55,       18};
+const int    MOD_CHECK[9]    = {       5,        5,       15,       15,       15,        5,       15,       15,       15};
+const int    MOD_MAXOPN[9]   = {       3,        4,        5,        6,        7,        5,        5,        9,        8};
+const int    MOD_MAXPND[9]   = {       2,        2,        2,        2,        2,        2,        3,        3,        2};
 
 //--- active runtime module parameters (populated in OnInit)
 double       MOD_OFF_B[9];
@@ -62,21 +64,21 @@ double       MOD_BE_LK[9];
 //+------------------------------------------------------------------+
 //| Inputs                                                           |
 //+------------------------------------------------------------------+
-input group "=== 9-Strategy Ninja Matrix (S1-S4 New + S5-S9 Core) ==="
-input bool   InpRun1            = true;    // Run Module S1 (24h Daily Pulse 24/12, Target 0.32%)
-input bool   InpRun2            = true;    // Run Module S2 (Cross-Session 27/13, Target 0.36%)
-input bool   InpRun3            = true;    // Run Module S3 (Structural Bridge 30/13, Target 0.40%)
-input bool   InpRun4            = true;    // Run Module S4 (Macro Yield Wave 34/14, Target 0.48%)
+input group "=== 9-Strategy Ninja Marsshot Matrix (S1 Chop + S2 Trend + S3-S9 Breakouts) ==="
+input bool   InpRun1            = true;    // Run Module S1 (Chop Market Milker 9/3, Target 0.28%)
+input bool   InpRun2            = true;    // Run Module S2 (Trend Pullback Follower 19/6, Target 0.44%)
+input bool   InpRun3            = true;    // Run Module S3 (Structural Bridge 30/13, Target 0.46%)
+input bool   InpRun4            = true;    // Run Module S4 (Macro Yield Wave 34/14, Target 0.52%)
 input bool   InpRun5            = true;    // Run Module S5 (Core Swing 28/13, Target 0.35%)
 input bool   InpRun6            = true;    // Run Module S6 (Rapid Pulse 26/13, Target 0.33%)
 input bool   InpRun7            = true;    // Run Module S7 (Deep Runner 28/12, Target 0.54%)
 input bool   InpRun8            = true;    // Run Module S8 (Mid-Wave 25/13, Target 0.43%)
 input bool   InpRun9            = true;    // Run Module S9 (Macro Scout 28/14, Target 0.58%)
 
-input group "=== Moonshot Risk & Compounding ==="
+input group "=== Marsshot Risk & Compounding ==="
 input double InpFixLot          = 0.0;     // Fixed Lot (0.0 = Auto Geometric Compounding)
 input double InpLotStep         = 0.01;    // Lot Step per Balance Block
-input double InpBalanceStep     = 150.0;   // Balance Step ($150 = USDJPY Moonshot, $500 = Moderate, $1500 = Prop)
+input double InpBalanceStep     = 85.0;    // Balance Step ($85 = USDJPY Marsshot, $500 = Moderate, $1500 = Prop)
 input int    InpMaxPositions    = 9;       // Max Open Positions Across All 9 Modules
 input double InpStopDist        = 0.65;    // Hard Stop Distance from Fill (JPY on USDJPY, 0.65 = 65 pips)
 input bool   InpAllowOpposite   = false;   // Allow Hedging (Buy & Sell Open Together)
@@ -85,10 +87,10 @@ input group "=== v3.00 Supernova Alpha Enhancements ==="
 input bool   InpSkipHour11      = true;    // Exhaustion & WMR Fix Shield (Pause Stops in H11 & H18-19)
 input bool   InpSkipRolloverH0  = true;    // Rollover Spread Shield (Block New Stops in Server Hour 00:00-00:15)
 input bool   InpUseSellShield   = true;    // Carry & Judas-Swing Sell Shield (Filter Counter-Trend/Judas Sells)
-input bool   InpStage2Ratchet   = true;    // Stage-2 Profit Ratchet (At 70% of TP -> Lock 34% of TP)
+input bool   InpStage2Ratchet   = true;    // Stage-2 Profit Ratchet (At 65% of TP -> Lock 36% of TP)
 input bool   InpUseParachute    = true;    // Drawdown Parachute (Step Down Lots When DD > Parachute %)
-input double InpParachuteDDPct  = 24.0;    // Drawdown Parachute Trigger (% Below Equity HWM)
-input double InpParachuteMult   = 1.30;    // Balance Step Multiplier While Parachute Is Engaged
+input double InpParachuteDDPct  = 28.0;    // Drawdown Parachute Trigger (% Below Equity HWM)
+input double InpParachuteMult   = 1.25;    // Balance Step Multiplier While Parachute Is Engaged
 
 input group "=== Prop Firm Mode (Funded Account Safety) ==="
 input bool   InpPropMode        = false;   // Prop Firm Mode (No Hedging, 2-Min Hold, Daily/Max-Loss Floors)
@@ -113,6 +115,7 @@ datetime g_refill[9][2];          // re-entry window end after a fill
 double   g_prev_lvl[9][2];
 datetime g_last_check[9];
 datetime g_last_h1      = 0;
+datetime g_last_m15     = 0;
 long     g_cur_day      = -1;
 ulong    g_seen[];                // position tickets already handled
 int      g_placed       = 0;
@@ -339,8 +342,43 @@ double FindLevel(const int m, const bool is_buy)
 }
 
 //+------------------------------------------------------------------+
-//| Placement                                                        |
+//| Placement & Multi-Regime Filters (Chop Milker + Trend Follower)  |
 //+------------------------------------------------------------------+
+bool IsChopMilkerAligned(const bool is_buy)
+{
+   double h[], l[], c[];
+   ArraySetAsSeries(h, true);
+   ArraySetAsSeries(l, true);
+   ArraySetAsSeries(c, true);
+   if(CopyHigh(_Symbol, PERIOD_H1, 1, 16, h) < 16 ||
+      CopyLow(_Symbol,  PERIOD_H1, 1, 16, l) < 16 ||
+      CopyClose(_Symbol, PERIOD_H1, 1, 24, c) < 24)
+      return true;
+   double hi12 = h[0], lo12 = l[0];
+   for(int i = 1; i < 12; i++) { hi12 = MathMax(hi12, h[i]); lo12 = MathMin(lo12, l[i]); }
+   double range12 = hi12 - lo12;
+   // Chop Milker (S1) fires when 12h range is compressed/digesting (0.28 to 1.15 JPY) and aligned with carry
+   if(range12 < 0.28 || range12 > 1.15) return false;
+   double sma24 = 0.0;
+   for(int i = 0; i < 24; i++) sma24 += c[i];
+   sma24 /= 24.0;
+   return is_buy ? (c[0] >= sma24 - 0.12) : (c[0] <= sma24 - 0.20);
+}
+
+bool IsBuyTrendAligned()
+{
+   double c[];
+   ArraySetAsSeries(c, true);
+   int got = CopyClose(_Symbol, PERIOD_H1, 1, 36, c);
+   if(got < 36) return true;
+   double sum12 = 0.0, sum36 = 0.0;
+   for(int i = 0; i < 12; i++) sum12 += c[i];
+   for(int i = 0; i < 36; i++) sum36 += c[i];
+   double sma12 = sum12 / 12.0;
+   double sma36 = sum36 / 36.0;
+   return (c[0] >= sma36 && sma12 >= sma36 && c[0] >= c[12] + 0.08);
+}
+
 bool IsSellRegimeBearish()
 {
    double c[];
@@ -354,12 +392,17 @@ bool IsSellRegimeBearish()
    double sma48 = sum48 / 48.0;
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    // Require confirmed bearish H1 momentum & structure so SELL stops don't fight USDJPY carry drift
-   return (bid <= sma48 && sma24 <= sma48 && c[0] <= c[12] - 0.12);
+   return (bid <= sma48 && sma24 <= sma48 && c[0] <= c[12] - 0.10);
 }
 
 void TryPlace(const int m, const bool is_buy, const int why)
 {
    if(!is_buy && InpUseSellShield && !IsSellRegimeBearish()) return;
+   // S1 Chop-Milker (14/5): fast 5h range milker in compressed/chop regimes
+   if(MOD_STYLE[m] == 1 && !IsChopMilkerAligned(is_buy)) return;
+   // S2 Trend-Follower (18/6): fast 6h pullback continuation in confirmed H1 trend
+   if(MOD_STYLE[m] == 2 && is_buy && !IsBuyTrendAligned()) return;
+   if(MOD_STYLE[m] == 2 && !is_buy && !IsSellRegimeBearish()) return;
    double lvl = FindLevel(m, is_buy);
    if(lvl <= 0.0) return;
    if(why != 2 && CountPending(m, is_buy ? 0 : 1) > 0) return;
@@ -498,23 +541,55 @@ void ManagePositions()
       double fav   = is_buy ? bid - open : open - ask;
       bool   at_be = is_buy ? (sl >= open) : (sl > 0.0 && sl <= open);
 
-      // Stage-2 Runner Ratchet: when price reaches 70% of TP on medium/deep modules, lock 34% of TP
+      // Multi-Stage Runner Ratchet: at 65% of TP -> lock 36% of TP; at 82% of TP -> lock 60% of TP
       if(at_be)
       {
-         if(InpStage2Ratchet && MOD_TP[m] >= 0.0034 && fav >= open * (MOD_TP[m] * 0.70))
+         if(InpStage2Ratchet)
          {
-            double lock2 = NormPrice(is_buy ? open * (1.0 + MOD_TP[m] * 0.34) : open * (1.0 - MOD_TP[m] * 0.34));
-            bool   better = is_buy ? (lock2 > sl + _Point) : (lock2 < sl - _Point);
-            if(better && (is_buy ? (bid - lock2 > gap) : (lock2 - ask > gap)))
-               g_trade.PositionModify(ticket, lock2, tp);
+            double lockPct = 0.0;
+            if(fav >= open * (MOD_TP[m] * 0.82))
+               lockPct = MOD_TP[m] * 0.60;
+            else if(fav >= open * (MOD_TP[m] * 0.65))
+               lockPct = MOD_TP[m] * 0.36;
+
+            if(lockPct > MOD_BE_LK[m])
+            {
+               double lockPx = NormPrice(is_buy ? open * (1.0 + lockPct) : open * (1.0 - lockPct));
+               bool   better = is_buy ? (lockPx > sl + _Point) : (lockPx < sl - _Point);
+               if(better && (is_buy ? (bid - lockPx > gap) : (lockPx - ask > gap)))
+                  g_trade.PositionModify(ticket, lockPx, tp);
+            }
          }
          continue;
       }
 
-      if(fav < open * MOD_BE_AT[m]) continue;
-      double be = NormPrice(is_buy ? open * (1.0 + MOD_BE_LK[m]) : open * (1.0 - MOD_BE_LK[m]));
-      if(is_buy ? (bid - be <= gap) : (be - ask <= gap)) continue;
-      g_trade.PositionModify(ticket, be, tp);
+      if(fav >= open * MOD_BE_AT[m])
+      {
+         double be = NormPrice(is_buy ? open * (1.0 + MOD_BE_LK[m]) : open * (1.0 - MOD_BE_LK[m]));
+         if(is_buy ? (bid - be > gap) : (be - ask > gap))
+            g_trade.PositionModify(ticket, be, tp);
+         continue;
+      }
+
+      // Time-Decay Failed-Breakout Shield: if open >= 6 hours without hitting BE, scratch if slightly green or cut SL in half
+      if(age >= 6 * 3600)
+      {
+         if(fav >= open * 0.00030)
+         {
+            double scratch = NormPrice(is_buy ? open * 1.00010 : open * 0.99990);
+            if(is_buy ? (bid - scratch > gap && scratch > sl + _Point) : (scratch - ask > gap && scratch < sl - _Point))
+               g_trade.PositionModify(ticket, scratch, tp);
+         }
+         else
+         {
+            double tightDist = MathMin(InpStopDist, 0.34);
+            double tightSL   = NormPrice(is_buy ? open - tightDist : open + tightDist);
+            bool   betterSL  = is_buy ? (tightSL > sl + _Point && bid - tightSL > gap)
+                                      : (tightSL < sl - _Point && tightSL - ask > gap);
+            if(betterSL)
+               g_trade.PositionModify(ticket, tightSL, tp);
+         }
+      }
    }
 }
 
@@ -898,9 +973,9 @@ void UpdateHUD()
 
    string hud = "";
    hud += "====================================================================\n";
-   hud += "  CHRYSALIS NINJA v3.00 — 9-MODULE SUPERNOVA MOONSHOT (USDJPY)\n";
+   hud += "  CHRYSALIS NINJA v3.10 — 9-MODULE SUPERNOVA MARSSHOT (USDJPY)\n";
    hud += "====================================================================\n";
-   hud += StringFormat("  [MOONSHOT]   Start: $%.2f  |  Balance: $%.2f  |  Equity: $%.2f\n", start, bal, eq);
+   hud += StringFormat("  [MARSSHOT]   Start: $%.2f  |  Balance: $%.2f  |  Equity: $%.2f\n", start, bal, eq);
    hud += StringFormat("  [GROWTH]     Multiplier: %.2fx (%+.1f%%)  |  Peak HWM: $%.2f (DD: %.2f%%)\n", mult, roi_pct, g_hwm, MathMax(0.0, dd_pct));
    hud += StringFormat("  [LOT TIER]   Active Size: %.2f lots/order  |  Next Step-Up (+%.2f): $%.2f away\n", cur_lots, InpLotStep, to_next);
    hud += StringFormat("  [PARACHUTE]  %s  |  Max Stack: %d / %d open\n", para_state, CountPositions(-1), InpMaxPositions);
