@@ -114,6 +114,8 @@ int      g_trig[9][2];            // placement trigger per module and side (0 bu
 datetime g_refill[9][2];          // re-entry window end after a fill
 double   g_prev_lvl[9][2];
 datetime g_last_check[9];
+long     g_buy_day[9];            // day of last BUY fill per module (prevents same-day stale re-entry)
+long     g_sell_day[9];           // day of last SELL fill per module (prevents same-day stale re-entry)
 datetime g_last_h1      = 0;
 datetime g_last_m15     = 0;
 long     g_cur_day      = -1;
@@ -122,6 +124,7 @@ int      g_placed       = 0;
 int      g_fills        = 0;
 string   g_last_event   = "Waiting for first market tick...";
 bool     g_h11_paused   = false;
+bool     g_buy_paused   = false;
 bool     g_sell_paused  = false;
 bool     g_parachute_on = false;
 //--- account & prop firm tracking
@@ -147,6 +150,8 @@ int OnInit()
    {
       g_run[m]        = runs[m];
       g_last_check[m] = 0;
+      g_buy_day[m]    = -1;
+      g_sell_day[m]   = -1;
       MOD_OFF_B[m]    = MOD_OFF_B_V1[m];
       MOD_OFF_S[m]    = MOD_OFF_S_V1[m];
       MOD_TP[m]       = MOD_TP_V1[m];
@@ -256,26 +261,52 @@ void OnTick()
       }
    }
 
-   // Carry & Judas-Swing Sell Shield: delete resting SELL_STOP orders during Judas/WMR hours
-   bool inSellJudasHour = (dt.hour == 3 || dt.hour == 4 || dt.hour == 8 || dt.hour == 9 || dt.hour == 12 || dt.hour == 17 || dt.hour == 18 || dt.hour == 20 || dt.hour == 21);
+   long day = (long)h1 / 86400;
+   bool new_day = (day != g_cur_day);
+   g_cur_day = day;
+
+   // Isolated 1-Hour Fakeout Buy Shield (H1 Post-Rollover, H7 Tokyo-Close, H9 London-Open Judas)
+   bool inBuyJudasHour = (dt.hour == 1 || dt.hour == 7 || dt.hour == 9);
+   if(InpSkipHour11)
+   {
+      if(inBuyJudasHour)
+      {
+         for(int i = OrdersTotal() - 1; i >= 0; i--)
+         {
+            ulong ticket = OrderGetTicket(i);
+            if(ticket == 0) continue;
+            int m = OrderModule();
+            if(m < 0) continue;
+            if(OrderGetInteger(ORDER_TYPE) != ORDER_TYPE_BUY_STOP) continue;
+            if(g_trade.OrderDelete(ticket))
+               if(g_trig[m][0] < 1 && g_buy_day[m] != day) g_trig[m][0] = 1;
+         }
+         g_buy_paused = true;
+      }
+      else if(g_buy_paused)
+      {
+         g_buy_paused = false;
+      }
+   }
+
+   // Dynamic Bear Regime Sync + Judas-Swing Sell Shield (allow SELL_STOP in H1, H2 Mon-Thu, H7, H22-23 when Bearish)
+   bool bearRegime = (!InpUseSellShield || IsSellRegimeBearish());
+   bool inSellJudasHour = (dt.hour == 3 || dt.hour == 4 || dt.hour == 5 || dt.hour == 6 || (dt.hour >= 8 && dt.hour <= 21) || (dt.day_of_week == 5 && dt.hour == 2));
    if(InpUseSellShield)
    {
-      if(inSellJudasHour)
+      if(!bearRegime || inSellJudasHour)
       {
-         if(!g_sell_paused)
+         for(int i = OrdersTotal() - 1; i >= 0; i--)
          {
-            for(int i = OrdersTotal() - 1; i >= 0; i--)
-            {
-               ulong ticket = OrderGetTicket(i);
-               if(ticket == 0) continue;
-               int m = OrderModule();
-               if(m < 0) continue;
-               if(OrderGetInteger(ORDER_TYPE) != ORDER_TYPE_SELL_STOP) continue;
-               if(g_trade.OrderDelete(ticket))
-                  if(g_trig[m][1] < 1) g_trig[m][1] = 1;
-            }
-            g_sell_paused = true;
+            ulong ticket = OrderGetTicket(i);
+            if(ticket == 0) continue;
+            int m = OrderModule();
+            if(m < 0) continue;
+            if(OrderGetInteger(ORDER_TYPE) != ORDER_TYPE_SELL_STOP) continue;
+            if(g_trade.OrderDelete(ticket))
+               if(g_trig[m][1] < 1 && g_sell_day[m] != day) g_trig[m][1] = 1;
          }
+         g_sell_paused = true;
       }
       else if(g_sell_paused)
       {
@@ -283,9 +314,6 @@ void OnTick()
       }
    }
 
-   long day = (long)h1 / 86400;
-   bool new_day = (day != g_cur_day);
-   g_cur_day = day;
    for(int m = 0; m < N_MOD; m++)
    {
       if(!g_run[m]) continue;
@@ -313,9 +341,9 @@ void OnTick()
          g_last_check[m] = slot;
          for(int s = 0; s < 2; s++)
          {
-            if(s == 1 && InpUseSellShield && inSellJudasHour) continue;
+            if(s == 0 && InpSkipHour11 && inBuyJudasHour) continue;
+            if(s == 1 && InpUseSellShield && (!bearRegime || inSellJudasHour)) continue;
             int why = g_trig[m][s];
-            g_trig[m][s] = 0;
             if(why == 0) continue;
             TryPlace(m, s == 0, why);
          }
@@ -411,18 +439,23 @@ bool IsSellRegimeBearish()
 
 void TryPlace(const int m, const bool is_buy, const int why)
 {
+   int s = is_buy ? 0 : 1;
+   if(is_buy && why == 1 && g_buy_day[m] == g_cur_day) { g_trig[m][0] = 0; return; }
+   if(!is_buy && why == 1 && g_sell_day[m] == g_cur_day) { g_trig[m][1] = 0; return; }
    if(!is_buy && InpUseSellShield && !IsSellRegimeBearish()) return;
-   // S1 Chop-Milker (14/5): fast 5h range milker in compressed/chop regimes
-   if(MOD_STYLE[m] == 1 && !IsChopMilkerAligned(is_buy)) return;
-   // S2 Trend-Follower (18/6): fast 6h pullback continuation in confirmed H1 trend
-   if(MOD_STYLE[m] == 2 && is_buy && !IsBuyTrendAligned()) return;
+   // S1 Chop-Milker (22/11): range milker in compressed/chop regimes
+   if(MOD_STYLE[m] == 1 && !IsChopMilkerAligned(is_buy)) { if(is_buy) g_trig[m][0] = 0; return; }
+   // S2 Trend-Follower (24/11): pullback continuation in confirmed H1 trend
+   if(MOD_STYLE[m] == 2 && is_buy && !IsBuyTrendAligned()) { g_trig[m][0] = 0; return; }
    if(MOD_STYLE[m] == 2 && !is_buy && !IsSellRegimeBearish()) return;
+   if(CountPositions(m) >= MOD_MAXOPN[m] || CountPositions(-1) >= InpMaxPositions) { if(is_buy) g_trig[m][0] = 0; return; }
+   if(!InpAllowOpposite || InpPropMode)
+      if(HasOpposite(is_buy)) { if(is_buy) g_trig[m][0] = 0; return; }
+   // Consume trigger once regime and exposure gates are satisfied
+   g_trig[m][s] = 0;
    double lvl = FindLevel(m, is_buy);
    if(lvl <= 0.0) return;
-   if(why != 2 && CountPending(m, is_buy ? 0 : 1) > 0) return;
-   if(CountPositions(m) >= MOD_MAXOPN[m] || CountPositions(-1) >= InpMaxPositions) return;
-   if(!InpAllowOpposite || InpPropMode)
-      if(HasOpposite(is_buy)) return;
+   if(why != 2 && CountPending(m, s) > 0) return;
    double entry = NormPrice(is_buy ? lvl * (1.0 - MOD_OFF_B[m]) : lvl * (1.0 + MOD_OFF_S[m]));
    if(HasPendingAt(m, is_buy, entry)) return;
    if(CountPending(m, is_buy ? 0 : 1) >= MOD_MAXPND[m]) return;
@@ -497,6 +530,8 @@ void HandleNewPositions()
       ArrayResize(g_seen, n + 1, 64);
       g_seen[n] = ticket;
       bool is_buy = ((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+      if(is_buy)  g_buy_day[m]  = (long)PositionGetInteger(POSITION_TIME) / 86400;
+      else        g_sell_day[m] = (long)PositionGetInteger(POSITION_TIME) / 86400;
       g_refill[m][is_buy ? 0 : 1] = (datetime)((long)PositionGetInteger(POSITION_TIME) + REFILL_SEC);
       g_fills++;
       double open = PositionGetDouble(POSITION_PRICE_OPEN);
