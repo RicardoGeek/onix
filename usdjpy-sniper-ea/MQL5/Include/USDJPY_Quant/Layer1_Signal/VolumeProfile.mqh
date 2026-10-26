@@ -92,7 +92,7 @@ public:
          profileStartServer = serverDayStart - 4 * 3600;
 
       MqlRates m1Rates[];
-      int copied = CopyRates(m_symbol, PERIOD_M1, profileStartServer, serverNow, m1Rates);
+      int copied = CopyRates(m_symbol, PERIOD_M1, profileStartServer, currentM1BarTime, m1Rates);
       if(copied < 5)
         {
          copied = CopyRates(m_symbol, PERIOD_M1, 1, 120, m1Rates);

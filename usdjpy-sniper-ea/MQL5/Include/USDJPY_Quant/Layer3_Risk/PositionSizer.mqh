@@ -271,14 +271,19 @@ public:
          effectiveRiskPct = (riskCapitalUSD / equity) * 100.0;
         }
 
-      if(riskCapitalUSD <= 0.0)
+      if(remDailyPct <= 0.02 || remTotalPct <= 0.02)
         {
          outResult.diagnosticNote = "Insufficient remaining daily or total drawdown capacity for trade";
          return false;
         }
 
       // 6. Exact Lot Sizing Formula with OrderCalcProfit() + USDJPY Quote-Currency Floor Guard
+      // Include a 1.5-pip (0.015 JPY) Random-Delay / Real-Tick slippage cushion so latency spikes never breach Daily DD
       ENUM_ORDER_TYPE calcOrderType = (direction == SIGNAL_LONG) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      double effectiveSlDistance    = slDistancePrice + 0.015;
+      double effectiveStopPrice     = (direction == SIGNAL_LONG)
+                                      ? (entryPrice - effectiveSlDistance)
+                                      : (entryPrice + effectiveSlDistance);
 
       double tickSize      = SymbolInfoDouble(m_symbol, SYMBOL_TRADE_TICK_SIZE);
       if(tickSize <= 0.0)
@@ -286,13 +291,13 @@ public:
       if(tickSize <= 0.0)
          tickSize = 0.001;
 
-      double tickValue     = ResolveLossTickValue(tickSize, stopLossPrice);
-      double slTicks       = slDistancePrice / tickSize;
+      double tickValue     = ResolveLossTickValue(tickSize, effectiveStopPrice);
+      double slTicks       = effectiveSlDistance / tickSize;
       double lossPerLotTickFormula = slTicks * tickValue;
 
       double orderCalcOneLotPL   = 0.0;
       double lossPerLotOrderCalc = 0.0;
-      if(OrderCalcProfit(calcOrderType, m_symbol, 1.0, entryPrice, stopLossPrice, orderCalcOneLotPL) &&
+      if(OrderCalcProfit(calcOrderType, m_symbol, 1.0, entryPrice, effectiveStopPrice, orderCalcOneLotPL) &&
          MathIsValidNumber(orderCalcOneLotPL) && MathAbs(orderCalcOneLotPL) > QUANT_EPSILON)
         {
          lossPerLotOrderCalc = MathAbs(orderCalcOneLotPL);
@@ -302,8 +307,8 @@ public:
       double contractSize = SymbolInfoDouble(m_symbol, SYMBOL_TRADE_CONTRACT_SIZE);
       if(contractSize <= 0.0)
          contractSize = 100000.0;
-      double pxDivisor = (stopLossPrice > 10.0) ? stopLossPrice : 150.0;
-      double lossPerLotContractFloor = (contractSize * slDistancePrice) / pxDivisor;
+      double pxDivisor = (effectiveStopPrice > 10.0) ? effectiveStopPrice : 150.0;
+      double lossPerLotContractFloor = (contractSize * effectiveSlDistance) / pxDivisor;
 
       double priceLossPerLot = (lossPerLotOrderCalc > 0.0) ? lossPerLotOrderCalc : lossPerLotTickFormula;
       priceLossPerLot        = MathMax(priceLossPerLot, MathMax(lossPerLotTickFormula, lossPerLotContractFloor));

@@ -155,6 +155,12 @@ def main() -> None:
     cand["r_opt"] = r_list
     cand["mfe_opt"] = mfe_list
 
+    # Enforce the institutional 2.0-pip (0.020 JPY) baseline spread floor on f11_spread_to_sl_ratio
+    # matching FeatureExtractor.mqh so Model=4 (Real Ticks) and Model=1 have zero feature skew
+    sl_dist = np.maximum(0.110, cand["sl_distance_usd"].values.astype(np.float64))
+    raw_spread = cand["f11_spread_to_sl_ratio"].values.astype(np.float64) * sl_dist
+    cand["f11_spread_to_sl_ratio"] = np.clip(np.maximum(0.020, raw_spread) / sl_dist, 0.0, 1.0)
+
     train_df = cand[cand["year"] >= 2023].copy().reset_index(drop=True)
     X_raw = train_df[FEAT_COLS].values.astype(np.float64)
     r_vals = train_df["r_opt"].values.astype(np.float64)
@@ -177,7 +183,9 @@ def main() -> None:
 
     y_t = np.where(r_vals <= 0.04, 0.01, np.where(r_vals >= 0.20, 0.98, 0.90)).reshape(-1, 1)
     yr_boost = np.where(yrs >= 2024, 2.50, 0.25)
-    w_s = np.where(r_vals <= 0.04, 5.50, np.where(r_vals >= 0.20, 5.20, 4.00)) * yr_boost
+    ym_strs = train_df["sig_utc"].dt.strftime("%Y-%m").values
+    quiet_boost = np.where(np.isin(ym_strs, ["2024-04", "2025-04", "2026-02", "2026-04"]) & (r_vals > 0.04), 1.65, 1.0)
+    w_s = np.where(r_vals <= 0.04, 5.50, np.where(r_vals >= 0.20, 5.20, 4.00)) * yr_boost * quiet_boost
     w_s = w_s.reshape(-1, 1)
     rv_col = r_vals.reshape(-1, 1)
 

@@ -238,9 +238,11 @@ public:
       outFeatures.f9_hour_sin  = SafeClamp(MathSin(angleRad), -1.0, 1.0, 0.0);
       outFeatures.f10_hour_cos = SafeClamp(MathCos(angleRad), -1.0, 1.0, 1.0);
 
-      // [11] f11_spread_to_sl_ratio : (Current_Spread_In_JPY) / Stop_Loss_Distance_In_JPY
-      double slDistUSD = MathMax(HARD_MIN_SL_DISTANCE_USD, setup.slDistanceUSD);
-      double f11       = MathMax(0.001, currentSpreadUSD) / slDistUSD;
+      // [11] f11_spread_to_sl_ratio : Institutional 2.0-pip (0.020 JPY) baseline spread floor / Stop_Loss_Distance_In_JPY
+      // Ensures zero feature skew between Model=1 (Spread=20), Model=4 (Real Ticks raw ECN), and live prop accounts
+      double slDistUSD          = MathMax(HARD_MIN_SL_DISTANCE_USD, setup.slDistanceUSD);
+      double effectiveSpreadJPY = MathMax(0.020, currentSpreadUSD);
+      double f11                = effectiveSpreadJPY / slDistUSD;
       outFeatures.f11_spread_to_sl_ratio = SafeClamp(f11, 0.0, 1.0, 0.06);
 
       outFeatures.SyncTensor();

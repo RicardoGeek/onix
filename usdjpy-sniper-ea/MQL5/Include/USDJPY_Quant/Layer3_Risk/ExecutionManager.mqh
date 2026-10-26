@@ -439,10 +439,17 @@ public:
       m_ctx.orderPlacedM5BarTime      = iTime(m_symbol, PERIOD_M5, 0);
       m_ctx.expiryM5Bars              = (setup.expiryM5Bars > 0 ? setup.expiryM5Bars : 3);
       m_ctx.plannedEntryPrice         = entryPrice;
-      m_ctx.actualEntryPrice          = (filledImmediately ? m_trade.ResultPrice() : entryPrice);
+      double fillPx                   = (filledImmediately && m_trade.ResultPrice() > 0.0) ? m_trade.ResultPrice() : entryPrice;
+      m_ctx.actualEntryPrice          = fillPx;
+      m_ctx.initialRiskDistanceUSD    = MathMax(HARD_MIN_SL_DISTANCE_USD, setup.slDistanceUSD);
+      if(filledImmediately && MathAbs(fillPx - entryPrice) > 0.001)
+        {
+         tp1Price = (setup.direction == SIGNAL_LONG)
+                    ? NormalizeSymbolPrice(m_symbol, fillPx + MathAbs(setup.tp1Price - setup.entryLimitPrice))
+                    : NormalizeSymbolPrice(m_symbol, fillPx - MathAbs(setup.entryLimitPrice - setup.tp1Price));
+        }
       m_ctx.initialStopLoss           = slPrice;
       m_ctx.currentStopLoss           = slPrice;
-      m_ctx.initialRiskDistanceUSD    = MathAbs(entryPrice - slPrice);
       m_ctx.tp1Price                  = tp1Price;
       m_ctx.tp2Price                  = tp2Price;
       m_ctx.initialLots               = lots;
