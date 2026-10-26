@@ -611,7 +611,7 @@ public:
            {
             double currentVol = m_posInfo.Volume();
             double minVol     = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN);
-            double partVol    = NormalizeSymbolLots(m_symbol, currentVol * 0.35);
+            double partVol    = NormalizeSymbolLots(m_symbol, currentVol * 0.42);
             if(partVol < minVol && currentVol >= (2.0 * minVol - QUANT_EPSILON))
                partVol = minVol;
             double remainVol  = currentVol - partVol;
@@ -625,12 +625,12 @@ public:
                   if(m_logger != NULL)
                     {
                      m_logger.Info(StringFormat(
-                        "TP1 Reached @ %.3f: Closed 35%% (%.2f lots) of Position #%I64u; tightening 65%% runner SL to -0.30R",
+                        "TP1 Reached @ %.3f: Closed 42%% (%.2f lots) of Position #%I64u; tightening 58%% runner SL to -0.30R",
                         markPx, partVol, m_ctx.positionTicket));
                      m_logger.WriteTradeLifecycleCSV(
                         m_ctx.setupId, m_ctx.positionTicket, "TP1_PARTIAL_50PCT", m_ctx.direction,
                         partVol, markPx, m_ctx.currentStopLoss, m_ctx.tp1Price, m_ctx.tp2Price,
-                        m_ctx.onnxProbability, 0.0, m_ctx.riskCapitalUSD, 0.0, 0.0, "TP1 Partial Close (35%)");
+                        m_ctx.onnxProbability, 0.0, m_ctx.riskCapitalUSD, 0.0, 0.0, "TP1 Partial Close (42%)");
                     }
                  }
               }
@@ -698,13 +698,13 @@ public:
             double minBeR  = MathMax(0.10, ComputeBreakevenOffsetPrice() / riskUSD);
             double lockedR = minBeR;
             if(currentR >= 2.80)
-               lockedR = 2.05;
+               lockedR = 2.10;
             else if(currentR >= 2.25)
-               lockedR = 1.40;
+               lockedR = 1.45;
             else if(currentR >= 1.65)
-               lockedR = 0.78;
+               lockedR = 0.85;
             else if(currentR >= 1.32)
-               lockedR = 0.38;
+               lockedR = 0.42;
 
             double ratchetSL = (m_ctx.direction == SIGNAL_LONG)
                                ? NormalizeSymbolPrice(m_symbol, m_ctx.actualEntryPrice + lockedR * riskUSD)

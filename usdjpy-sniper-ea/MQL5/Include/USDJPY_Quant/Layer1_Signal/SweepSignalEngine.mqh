@@ -529,13 +529,7 @@ public:
                                            const double realizedR,
                                            const datetime closedTimeUTC)
      {
-      if(realizedR < 0.0)
-        {
-         m_lastClosedDirection   = direction;
-         m_lastClosedTimeUTC     = closedTimeUTC;
-         m_lastClosedCooldownSec = 9000;
-        }
-      else if(realizedR < 0.40)
+      if(realizedR < -0.05)
         {
          m_lastClosedDirection   = direction;
          m_lastClosedTimeUTC     = closedTimeUTC;

@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Principal Quantitative Systems Engineering"
 #property link      "https://www.mql5.com"
-#property version   "1.00"
-#property description "USDJPY Institutional Liquidity Sweep + M1 Volume Profile + Native ONNX Meta-Labeling EA"
+#property version   "2.00"
+#property description "USDJPY Institutional Liquidity Sweep + M1 Volume Profile + Native ONNX Meta-Labeling EA (v2.00 High-Velocity)"
 #property description "3 Active Killzones (Tokyo/London/NY) | 1:100 Prop Forex Ready | 3.0% Daily / 6.0% Total DD Ceiling"
 #property strict
 
@@ -32,15 +32,15 @@ input group "=== [1] LAYER 3: RISK MODE & DRAWDOWN PROTECTION ==="
 input ENUM_RISK_MODE InpRiskMode                  = MODE_PROP_GUARD;    // Operating Risk Mode ($50k Prop vs Growth)
 input ENUM_DD_TYPE   InpDrawdownType              = DD_TRAILING_HWM;    // Max Drawdown Reference (Trailing HWM vs Static)
 input double         InpCommissionPerLotRoundTurn = 7.00;               // Round-Turn ECN Commission per Lot (USD)
-input double         InpPropTier2RiskPct          = 1.05;               // Prop Mode Tier-2 Risk % (0.58 <= P < 0.72)
-input double         InpPropTier1RiskPct          = 1.88;               // Prop Mode Tier-1 Risk % (P >= 0.72)
-input double         InpGrowthTier2RiskPct        = 1.10;               // Growth Mode Tier-2 Base Risk % (0.58 <= P < 0.72)
-input double         InpGrowthTier1RiskPct        = 1.92;               // Growth Mode Tier-1 Base Risk % (P >= 0.72)
+input double         InpPropTier2RiskPct          = 1.35;               // Prop Mode Tier-2 Risk % (0.56 <= P < 0.70)
+input double         InpPropTier1RiskPct          = 1.95;               // Prop Mode Tier-1 Risk % (P >= 0.70)
+input double         InpGrowthTier2RiskPct        = 1.40;               // Growth Mode Tier-2 Base Risk % (0.56 <= P < 0.70)
+input double         InpGrowthTier1RiskPct        = 2.05;               // Growth Mode Tier-1 Base Risk % (P >= 0.70)
 
 input group "=== [2] LAYER 2: NATIVE ONNX META-LABELER ==="
 input bool           InpUseOnnxModel              = true;               // Enable Native ONNX Model (false = Deterministic / Data Export)
-input double         InpOnnxTier2Threshold        = 0.58;               // Minimum ONNX Win Probability Threshold (Tier 2)
-input double         InpOnnxTier1Threshold        = 0.72;               // High-Conviction ONNX Win Probability (Tier 1)
+input double         InpOnnxTier2Threshold        = 0.56;               // Minimum ONNX Win Probability Threshold (Tier 2)
+input double         InpOnnxTier1Threshold        = 0.70;               // High-Conviction ONNX Win Probability (Tier 1)
 
 input group "=== [3] LAYER 1: SWEEP & VOLUME PROFILE ENGINE ==="
 input int            InpBrokerGMTOffsetHours      = 2;                  // Tester Fallback GMT Offset (Live/VPS Auto-Detects via TimeGMT)

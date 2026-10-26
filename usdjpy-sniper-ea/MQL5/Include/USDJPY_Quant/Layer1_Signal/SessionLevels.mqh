@@ -479,12 +479,12 @@ public:
       if(minOfDay >= (20 * 60 + 55) && minOfDay <= (22 * 60 + 10))
          return SESSION_ROLLOVER_BLACKOUT;
 
-      // Tokyo Post-Fix & JGB Auction Reversal Killzone: 03:00 - 04:15 UTC (180 - 255)
-      if(minOfDay >= (3 * 60) && minOfDay <= (4 * 60 + 15))
+      // Tokyo Post-Fix & JGB Auction Reversal Killzone: 03:00 - 03:55 UTC (cut off 04:00-04:15 dead zone)
+      if(minOfDay >= (3 * 60) && minOfDay <= (3 * 60 + 55))
          return SESSION_TOKYO_KILLZONE;
 
-      // Late-Asian Accumulation: 04:16 - 06:29 UTC (256 - 389)
-      if(minOfDay > (4 * 60 + 15) && minOfDay < (6 * 60 + 30))
+      // Late-Asian Accumulation: 03:56 - 06:29 UTC (236 - 389)
+      if(minOfDay > (3 * 60 + 55) && minOfDay < (6 * 60 + 30))
          return SESSION_ASIAN_ACCUMULATION;
 
       // London Judas Reversal Killzone: 06:30 - 06:55 UTC & 08:00 - 10:55 UTC (skip 07:00-07:55 London Open breakout impulse)
@@ -492,8 +492,8 @@ public:
          (minOfDay >= (8 * 60) && minOfDay <= (10 * 60 + 55)))
          return SESSION_LONDON_KILLZONE;
 
-      // New York Post-Data Reversal Killzone: 13:00 - 15:55 UTC (skip 12:00-12:55 8:30am ET US macro impulse candle)
-      if(minOfDay >= (13 * 60) && minOfDay <= (15 * 60 + 55))
+      // New York Post-Data & London Close Reversal Killzone: 13:00 - 16:45 UTC (skip 12:00-12:55 8:30am ET US macro impulse)
+      if(minOfDay >= (13 * 60) && minOfDay <= (16 * 60 + 45))
          return SESSION_NY_KILLZONE;
 
       return SESSION_OUTSIDE_KILLZONE;

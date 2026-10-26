@@ -158,11 +158,11 @@ public:
         {
          baseRiskPct = isTier1Signal ? m_propTier1RiskPct : m_propTier2RiskPct;
 
-         if(currentTotalDDPct >= 3.00)
+         if(currentTotalDDPct >= 3.40)
             effectiveRiskPct = baseRiskPct * 0.55;
-         else if(currentTotalDDPct >= 2.00 || dampenerActive)
+         else if(currentTotalDDPct >= 2.60 || dampenerActive)
             effectiveRiskPct = baseRiskPct * 0.70;
-         else if(currentTotalDDPct >= 1.15)
+         else if(currentTotalDDPct >= 1.85)
             effectiveRiskPct = baseRiskPct * 0.85;
          else
             effectiveRiskPct = baseRiskPct;
@@ -173,13 +173,13 @@ public:
          double dailyScratchFloorUSD = (m_equityGuard.GetDayStartReference() > 0.0 ? m_equityGuard.GetDayStartReference() * 0.0015 : 5.0);
 
          if(dailyPnLUSD < -dailyScratchFloorUSD || lossesToday > 0)
-            effectiveRiskPct = MathMin(effectiveRiskPct, baseRiskPct * 0.38);
+            effectiveRiskPct = MathMin(effectiveRiskPct, baseRiskPct * 0.50);
 
          baseRiskUSD    = equity * (effectiveRiskPct / 100.0);
          riskCapitalUSD = baseRiskUSD;
 
-         double hwmBufferUSD = MathMax(weeklyProfitUSD, (currentTotalDDPct < 0.25 ? equity * 0.008 : 0.0));
-         if(!dampenerActive && currentTotalDDPct < 0.50 && lossesToday == 0 && dailyPnLUSD >= -dailyScratchFloorUSD &&
+         double hwmBufferUSD = MathMax(weeklyProfitUSD, (currentTotalDDPct < 0.35 ? equity * 0.010 : 0.0));
+         if(!dampenerActive && currentTotalDDPct < 0.75 && lossesToday == 0 && dailyPnLUSD >= -dailyScratchFloorUSD &&
             hwmBufferUSD > 0.0)
            {
             houseMoneyBonusUSD = PROP_HOUSE_MONEY_SHARE * hwmBufferUSD;
@@ -252,8 +252,8 @@ public:
       double dayRef      = m_equityGuard.GetDayStartReference();
       double dailyScratchFloor = (dayRef > 0.0 ? dayRef * 0.0015 : 5.0);
       double safeDailyPct = (m_equityGuard.GetConsecutiveLossesToday() == 0 && m_equityGuard.GetDailyRealizedPnLUSD() >= -dailyScratchFloor)
-                            ? (remDailyPct * 0.90)
-                            : MathMax(0.0, (remDailyPct - 0.15) * 0.55);
+                            ? (remDailyPct * 0.92)
+                            : MathMax(0.0, (remDailyPct - 0.15) * 0.58);
       double safeDailyCapUSD = (dayRef > 0.0 ? dayRef : equity) * (safeDailyPct / 100.0);
       if(riskCapitalUSD > safeDailyCapUSD)
         {
