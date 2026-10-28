@@ -1,31 +1,67 @@
-# XAUUSD Hybrid Quantitative Sniper EA (`XAUUSD_Sniper_ONNX`)
+# ONIX Quantitative Trading Suite — 3-Asset Sniper + Chrysalis Power Duo (`XAUUSD`, `USDJPY`, `BTCUSD`)
 
-A 3-layer institutional MetaTrader 5 Expert Advisor (`MQL5` + native `ONNX` machine learning) engineered for **XAUUSD (Gold)** on the **M5** timeframe. The system combines Liquidity Sweep + Volume Profile microstructure detection with an embedded 12-feature ONNX Meta-Labeler and a strict prop-firm equity/lot-sizing engine.
+An institutional MetaTrader 5 Expert Advisor suite (`MQL5` + native `ONNX` machine learning) pairing **Controlled-Risk Prop Snipers** (`<3%` Daily / `<6%` Total Drawdown ceiling) with **Asymmetric `$300` Seed Moonshot Compounders** (`Chrysalis`) across **Gold (`XAUUSD`)**, **The Ninja (`USDJPY`)**, and **Bitcoin (`BTCUSD`)**.
 
 ---
 
-## 1. Repository Structure
+## 1. Quick Deployment Cheat Sheet (Complete 6-EA Fleet)
+
+Every EA uses an isolated **Magic Number** namespace (`20260401`, `20260501`, `20260777`, `20260888`, `20260901`, `20260990`), so they never collide even if multiple EAs run inside the same MT5 terminal.
+
+| Asset | EA Binary (`MQL5\Experts\`) | Archived Release (`bin/`) | Chart Timeframe | Role & Target Account | Default Magic Number | Changelog |
+| :--- | :--- | :--- | :---: | :--- | :---: | :--- |
+| **Gold (`XAUUSD`)** | `XAUUSD_Sniper_ONNX.ex5` | `bin/XAUUSD_Sniper_ONNX/XAUUSD_Sniper_ONNX_v4.25.ex5` (`v4.25`) | **`M5`** | Prop / Funded Guard (`<3%` Daily, `<6%` Total DD) | `20260401` | [`xauusd-quant-ea/CHANGELOG.md`](xauusd-quant-ea/CHANGELOG.md) |
+| **Gold (`XAUUSD`)** | `chrysalis_ea.ex5` | `bin/xauusd_chrysalis_ea/xauusd_chrysalis_ea_v2.40.ex5` (`v2.40`) | **`H1`** (or `M15`) | `$300` Seed Moonshot Compounder | `20260777` | [`chrysalis-moonshot-ea/CHANGELOG.md`](chrysalis-moonshot-ea/CHANGELOG.md) |
+| **Ninja (`USDJPY`)** | `USDJPY_Sniper_ONNX.ex5` | `bin/USDJPY_Sniper_ONNX/USDJPY_Sniper_ONNX_v2.10.ex5` (`v2.10`) | **`M5`** | Prop / Funded Guard (`<3%` Daily, `<6%` Total DD) | `20260501` | [`usdjpy-sniper-ea/CHANGELOG.md`](usdjpy-sniper-ea/CHANGELOG.md) |
+| **Ninja (`USDJPY`)** | `usdjpy_chrysalis_ea.ex5` | `bin/usdjpy_chrysalis_ea/usdjpy_chrysalis_ea_v3.10.ex5` (`v3.10`) | **`H1`** | `$300` Seed Marsshot Compounder | `20260888` | [`usdjpy-moonshot-ea/CHANGELOG.md`](usdjpy-moonshot-ea/CHANGELOG.md) |
+| **Bitcoin (`BTCUSD`)** | `BTCUSD_Sniper_ONNX.ex5` | `bin/BTCUSD_Sniper_ONNX/BTCUSD_Sniper_ONNX_v1.10.ex5` (`v1.10`) | **`M5`** | Prop / Capital Guard "Bart-Hunter" (`<6%` Total DD) | `20260901` | [`btcusd-sniper-ea/CHANGELOG.md`](btcusd-sniper-ea/CHANGELOG.md) |
+| **Bitcoin (`BTCUSD`)** | `btcusd_chrysalis_ea.ex5` | `bin/btcusd_chrysalis_ea/btcusd_chrysalis_ea_v2.00.ex5` (`v2.00`) | **`H1`** | `$300` Seed 24/7 Satoshi Supernova | `20260990` | [`btcusd-moonshot-ea/CHANGELOG.md`](btcusd-moonshot-ea/CHANGELOG.md) |
+
+---
+
+## 2. Repository Structure
 
 ```text
 onix/
 ├── README.md
 ├── AGENTS.md
-└── xauusd-quant-ea/
+├── bin/                                        # Versioned binary archive for all EA releases
+│   ├── XAUUSD_Sniper_ONNX/
+│   ├── USDJPY_Sniper_ONNX/
+│   ├── BTCUSD_Sniper_ONNX/
+│   ├── xauusd_chrysalis_ea/
+│   ├── usdjpy_chrysalis_ea/
+│   ├── btcusd_chrysalis_ea/
+│   └── aegis_regime_hunter_ea/
+├── xauusd-quant-ea/                            # Gold Prop Sniper (XAUUSD_Sniper_ONNX v4.21)
+├── chrysalis-moonshot-ea/                      # Gold $300 Moonshot (chrysalis_ea v2.40)
+├── usdjpy-sniper-ea/                           # USDJPY Prop Sniper (USDJPY_Sniper_ONNX v2.00)
+├── usdjpy-moonshot-ea/                         # USDJPY $300 Marsshot (usdjpy_chrysalis_ea v3.10)
+├── btcusd-sniper-ea/                           # BTCUSD Prop Sniper "Bart-Hunter" (BTCUSD_Sniper_ONNX v1.00)
+├── btcusd-moonshot-ea/                         # BTCUSD $300 Satoshi Supernova (btcusd_chrysalis_ea v2.00)
+└── aegis-regime-hunter-ea/                     # Aegis Regime Hunter EA (aegis_regime_hunter_ea v4.00)
+```
+
+### Detailed Sniper Architecture (`xauusd-quant-ea/`, `usdjpy-sniper-ea/`, `btcusd-sniper-ea/`)
+
+```text
+<asset>-sniper-ea/
+    ├── CHANGELOG.md
     ├── MQL5/
     │   ├── Experts/
-    │   │   ├── XAUUSD_Sniper_ONNX.mq5          # Main EA source (#resource embeds xauusd_meta_model.onnx)
-    │   │   └── XAUUSD_Sniper_ONNX.ex5          # Ready-to-run compiled MT5 binary (versioned)
+    │   │   ├── <ASSET>_Sniper_ONNX.mq5         # Main EA source (#resource embeds <asset>_meta_model.onnx)
+    │   │   └── <ASSET>_Sniper_ONNX.ex5         # Ready-to-run compiled MT5 binary (versioned)
     │   ├── Files/
     │   │   └── models/
-    │   │       └── xauusd_meta_model.onnx      # Production 12-feature float32 ONNX model (versioned)
+    │   │       └── <asset>_meta_model.onnx     # Production 12-feature float32 ONNX model (versioned)
     │   └── Include/
-    │       └── XAUUSD_Quant/
+    │       └── <ASSET>_Quant/
     │           ├── Core/
     │           │   ├── Definitions.mqh         # Enums, structs, constants, tick-step price normalization
     │           │   └── Logger.mqh              # Trade journal & 12-feature setup telemetry CSV logger
     │           ├── Layer1_Signal/
-    │           │   ├── SessionLevels.mqh       # Asian Range (00-07 UTC), PDH/PDL, M15 fractals & EQH/EQL
-    │           │   ├── VolumeProfile.mqh       # Intraday M1 Volume Profile ($0.25 bins, VPOC, VAH, VAL, LVNs)
+    │           │   ├── SessionLevels.mqh       # Killzones, Asian Range, PDH/PDL, M15 fractals & EQH/EQL
+    │           │   ├── VolumeProfile.mqh       # Intraday M1 Volume Profile (VPOC, VAH, VAL, LVNs)
     │           │   └── SweepSignalEngine.mqh   # 4-State FSM: Sweep -> Reclaim/MSS -> FVG Sniper Entry
     │           ├── Layer2_AI/
     │           │   ├── FeatureExtractor.mqh    # 12 stationary (ATR/SL-normalized) microstructure features
@@ -34,32 +70,41 @@ onix/
     │               ├── EquityGuard.mqh         # OnTick DD circuit breakers (2.25%/2.40% daily, 5.20%/5.40% total)
     │               ├── PositionSizer.mqh       # OrderCalcProfit() + Anti-10x Prop Guard + House-Money sizer
     │               └── ExecutionManager.mqh    # Single-position manager, TP1 @ +0.62R (35%), 5-stage runner ratchet
-    └── python_pipeline/
-        ├── config.py                           # Feature names, ONNX contract, and walk-forward configuration
-        ├── data_loader.py                      # MT5 bar & setup telemetry CSV loader
-        ├── feature_engineering.py              # Python parity implementation of the 12 stationary features
-        ├── triple_barrier_labeling.py          # Triple-barrier and MT5 telemetry outcome labeling
-        ├── train_walk_forward.py               # Purged Walk-Forward splitter & NativeResidualMetaClassifier
-        ├── export_onnx.py                      # Pure ONNX graph builder (Gemm/Tanh/Add/Sigmoid, zipmap=False)
-        ├── retrain_multiyear_onnx.py           # One-command multi-year (2024-2026+) ONNX retraining pipeline
-        └── bootstrap_dummy_onnx.py             # ONNX contract verification utility
+    └── python_pipeline/                        # ONNX training & export scripts
 ```
 
 > **Note**: Non-code artifacts (Strategy Tester HTML reports, `.ini` files, historical telemetry CSVs, and compilation logs) are stored outside the repository in `C:\Users\faker\Documents\onix_artifacts\`.
 
 ---
 
-## 2. Verified Strategy Tester Performance (`M5`, `Model=1` 1-Minute OHLC)
+## 3. Verified Strategy Tester Performance
 
-| Period | Account / Mode | Net Profit | Profit Factor | Deal Win Rate | Position Win Rate | Sharpe Ratio | Max Balance DD | Max Equity DD |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **`2024.01.01 – 2025.01.01`** | `$10,000` (`MODE_PROP_GUARD`) | **`+$5,762.12` (`+57.62%`)** | **`4.32`** | `85.34%` | `85.5%` (`53/62`) | `46.07` | `2.74%` | `4.90%` |
-| **`2024.01.01 – 2025.01.01`** | `$50,000` (`MODE_PROP_GUARD`) | **`+$29,040.43` (`+58.08%`)** | **`4.33`** | `85.34%` | `87.1%` (`54/62`) | `46.23` | `2.75%` | `4.92%` |
-| **`2025.01.01 – 2026.10.01`** | `$50,000` (`MODE_PROP_GUARD`) | **`+$138,107.31` (`+276.21%`)** | **`4.52`** | `80.52%` | `89.4%` (`126/141`) | `56.10` | `1.98%` | `4.15%` |
+### A. Prop Snipers (`$50,000` `MODE_PROP_GUARD`, `<3.0%` Daily DD / `<6.0%` Total DD Ceiling — `Model=4` 99%–100% Real Ticks + `ExecutionMode=-1` Random Delay)
+
+| EA (`M5`) | Tick Source & Quality (`Model=4` + Random Delay) | Period | Net Profit | Profit Factor | Win Rate | Max Balance DD | Max Equity DD |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **`XAUUSD_Sniper_ONNX v4.25`** | `XAUUSD_REAL` (`99% real ticks` — `56.1M` Dukascopy ticks) | `2024` | **`+$129,977.02` (`+259.95%`)** | **`12.84`** | **`89.61%`** (`207/231`) | `2.45%` | `2.99%` |
+| **`XAUUSD_Sniper_ONNX v4.25`** | `XAUUSD` Live01 (`99% real ticks` — `195.2M` Pepperstone ticks) | `2025–2026` | **`+$1,540,997.35` (`+3,081.99%`)** | **`12.18`** | **`92.79%`** (`463/499`) | `2.32%` | `3.39%` |
+| **`USDJPY_Sniper_ONNX v2.10`** | `USDJPY_REAL` (`99% real ticks` — `40.8M` Dukascopy ticks) | `2024` | **`+$48,339.08` (`+96.68%`)** | **`5.95`** | **`84.89%`** (`118/139`) | `2.14%` | `2.92%` |
+| **`USDJPY_Sniper_ONNX v2.10`** | `USDJPY` Live01 (`99% real ticks` — `102.5M` Pepperstone ticks) | `2025–2026` | **`+$71,066.50` (`+142.13%`)** | **`4.34`** | **`89.50%`** (`196/219`) | `2.09%` | `3.18%` |
+| **`BTCUSD_Sniper_ONNX v1.10`** | `BTCUSD_REAL` (`100% real ticks` — `57.4M` Dukascopy ticks) | `2024` | **`+$38,716.03` (`+77.43%`)** | **`3.43`** | **`85.61%`** (`119/139`) | `2.62%` | `3.91%` |
+| **`BTCUSD_Sniper_ONNX v1.10`** | `BTCUSD` Live01 (`100% real ticks` — `192.5M` Pepperstone ticks) | `2025–2026` | **`+$847,389.93` (`+1,694.78%`)** | **`7.73`** | **`89.93%`** (`670/745`) | `2.79%` | `3.98%` |
+
+### B. `$300` Seed Chrysalis Moonshot Compounders (`H1`, `1:500` Leverage)
+
+| EA (`H1`) | Modeling Regime | Period | Starting Deposit | Net Profit | Multiple | Profit Factor | Win Rate | Max Equity DD |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`chrysalis_ea v2.40` (`XAUUSD`)** | `Model=4` (Real Ticks + Random Delay) | `2024` | `$300` | **`+$123,789.80`** | **`413.6x`** | `1.97` | `85.14%` | `35.09%` |
+| **`chrysalis_ea v2.40` (`XAUUSD`)** | `Model=4` (Real Ticks + Random Delay) | `2025–2026` | `$300` | **`+$1,288,187.47`** | **`4,295.0x`** | `2.99` | `87.30%` | `26.83%` |
+| **`usdjpy_chrysalis_ea v3.10` (`USDJPY`)** | `Model=4` (Real Ticks + Random Delay) | `2024` | `$300` | **`+$166,184.42`** | **`554.9x`** | `1.99` | `87.65%` | `29.21%` |
+| **`usdjpy_chrysalis_ea v3.10` (`USDJPY`)** | `Model=4` (Real Ticks + Random Delay) | `2025–2026` | `$300` | **`+$154,992.20`** | **`517.6x`** | `2.07` | `88.78%` | `24.84%` |
+| **`btcusd_chrysalis_ea v2.00` (`BTCUSD`)** | `Model=4` (Real Ticks, Zero Latency) | `2024` | `$300` | **`+$2,391.95`** | **`9.0x`** | `1.31` | `88.68%` | `65.08%` |
+| **`btcusd_chrysalis_ea v2.00` (`BTCUSD`)** | `Model=4` (Real Ticks, Zero Latency) | `2025–2026` | `$300` | **`+$162,207.66`** | **`541.7x`** | `2.79` | `94.82%` | `42.11%` |
+| **`btcusd_chrysalis_ea v2.00` (`BTCUSD`)** | `Model=4` (Real Ticks + Random Delay) | `2025–2026` | `$300` | **`+$39,652.14`** | **`133.2x`** | `2.45` | `94.28%` | `45.36%` |
 
 ---
 
-## 3. Quick Installation (Ready-to-Use Binary)
+## 4. Quick Installation (Ready-to-Use Binaries)
 
 1. Copy `xauusd-quant-ea/MQL5/Experts/XAUUSD_Sniper_ONNX.ex5` into your MetaTrader 5 Data Folder under `MQL5\Experts\`.
 2. Attach `XAUUSD_Sniper_ONNX` to an **XAUUSD M5** chart or select it in the MT5 Strategy Tester.
@@ -74,28 +119,34 @@ onix/
 
 ---
 
-## 4. Standard Operating Procedure (SOP): How to Retrain the ONNX Model
+## 5. Standard Operating Procedure (SOP): How to Retrain the ONNX Models
 
-All 12 features in `FeatureExtractor.mqh` are normalized by `ATR` or `SL` distance (price-invariant). However, you should retrain the ONNX model **once every 1 to 3 months** so the meta-labeler adapts to changes in spread-to-ATR ratios and session liquidity behavior.
+All 12 features in `FeatureExtractor.mqh` are normalized by `ATR` or `SL` distance (price-invariant). However, you should retrain the ONNX models **once every 1 to 3 months** so the meta-labelers adapt to changes in spread-to-ATR ratios and session liquidity behavior.
 
 ### Step 1: Collect Latest Candidate Telemetry in MT5 Strategy Tester
 1. Open **MetaTrader 5 Strategy Tester**.
-2. Select `XAUUSD_Sniper_ONNX.ex5`, symbol `XAUUSD`, period `M5`, and modeling `1 minute OHLC`.
+2. Select `<ASSET>_Sniper_ONNX.ex5` (`XAUUSD_Sniper_ONNX.ex5`, `USDJPY_Sniper_ONNX.ex5`, or `BTCUSD_Sniper_ONNX.ex5`), the matching symbol, period `M5`, and modeling `1 minute OHLC`.
 3. Set the date range (for example, `2024.01.01` to the current date).
 4. Set the following inputs:
    - `InpUseOnnxModel` = `false` *(executes all Layer 1 candidate setups to record ground-truth outcomes)*
    - `InpEnableCsvTelemetry` = `true`
    - `InpCsvUseCommonFolder` = `true`
 5. Click **Start** and wait for completion.
-   - *Output*: MT5 writes `SIGNAL_TRIGGERED` and `POSITION_CLOSED` rows to `%APPDATA%\MetaQuotes\Terminal\Common\Files\xauusd_setup_telemetry.csv`.
+   - *Output*: MT5 writes `SIGNAL_TRIGGERED` and `POSITION_CLOSED` rows to `%APPDATA%\MetaQuotes\Terminal\Common\Files\<asset>_setup_telemetry.csv`.
 
 ### Step 2: Train and Export the New ONNX Model
-1. Open **PowerShell** in `c:\Users\faker\Documents\dev\onix\xauusd-quant-ea`.
-2. Run the multi-year ONNX retraining script:
-   ```powershell
-   C:\Users\faker\mlv\Scripts\python.exe python_pipeline\retrain_multiyear_onnx.py
-   ```
-   - *Output*: Validates the model with `onnx.checker` and `onnxruntime` and writes the updated binary to `xauusd-quant-ea/MQL5/Files/models/xauusd_meta_model.onnx`.
+Run the corresponding Python retraining pipeline from `c:\Users\faker\Documents\dev\onix`:
+```powershell
+# Gold (XAUUSD)
+C:\Users\faker\mlv\Scripts\python.exe xauusd-quant-ea\python_pipeline\retrain_multiyear_onnx.py
+
+# Ninja (USDJPY)
+C:\Users\faker\mlv\Scripts\python.exe usdjpy-sniper-ea\python_pipeline\train_usdjpy_onnx.py
+
+# Bitcoin (BTCUSD)
+C:\Users\faker\mlv\Scripts\python.exe btcusd-sniper-ea\python_pipeline\train_btcusd_onnx.py
+```
+- *Output*: Validates the model with `onnx.checker` and `onnxruntime` and writes the updated `.onnx` binary to `<asset>-sniper-ea/MQL5/Files/models/<asset>_meta_model.onnx`.
 
 ### Step 3: Recompile `XAUUSD_Sniper_ONNX.mq5` to Embed the Updated ONNX Model
 Because `XAUUSD_Sniper_ONNX.mq5` embeds `xauusd_meta_model.onnx` into `.ex5` via `#resource`, recompile the EA after every ONNX export:

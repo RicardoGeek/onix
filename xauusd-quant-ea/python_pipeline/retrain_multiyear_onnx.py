@@ -2,14 +2,12 @@
 retrain_multiyear_onnx.py
 =========================
 Retrains and exports the 12-feature XAUUSD ONNX Meta-Labeler (`xauusd_meta_model.onnx`)
-using exact MetaTrader 5 `POSITION_CLOSED` telemetry across multi-year regimes (2024-2026+)
-with M1 OHLC fallback for unexecuted candidate setups.
+strictly using the 99%-100% Real-Tick MetaTrader 5 `POSITION_CLOSED` telemetry
+(`2024` Dukascopy Real Ticks + `2025-2026` Pepperstone Live Real Ticks).
 """
 
 import os
 import sys
-import math
-import random
 import pandas as pd
 import numpy as np
 
@@ -17,8 +15,19 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_EA_DIR = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, SCRIPT_DIR)
 
-from train_walk_forward import NativeResidualMetaClassifier, _sigmoid
-from export_onnx import export_trained_model_to_onnx
+from pathlib import Path
+from config import ONNX_EXPORT_CONFIG
+from export_onnx import (
+    TENSOR_FLOAT,
+    TENSOR_INT64,
+    _build_float_initializer_proto,
+    _build_node_proto,
+    _build_value_info_proto,
+    _encode_bytes_field,
+    _encode_string_field,
+    _encode_varint_field,
+    _verify_onnx_file_if_possible,
+)
 
 COMMON_FILES = r"C:\Users\faker\AppData\Roaming\MetaQuotes\Terminal\Common\Files"
 ARTIFACTS_DIR = r"C:\Users\faker\Documents\onix_artifacts"
@@ -39,13 +48,68 @@ FEAT_COLS = [
 ]
 
 
+def build_xauusd_onnx_bytes(
+    linear_weights: np.ndarray,
+    linear_bias: float,
+    hidden_w1: np.ndarray,
+    hidden_b1: np.ndarray,
+    hidden_w2: np.ndarray,
+    hidden_b2: float,
+) -> bytes:
+    cfg = ONNX_EXPORT_CONFIG
+    n_features, hidden_dim = hidden_w1.shape
+    flat_w1 = hidden_w1.reshape(-1).astype(float).tolist()
+
+    initializers = [
+        _build_float_initializer_proto("W_lin", [n_features, 1], linear_weights.reshape(-1).astype(float).tolist()),
+        _build_float_initializer_proto("B_lin", [1, 1], [float(linear_bias)]),
+        _build_float_initializer_proto("W_hid1", [n_features, hidden_dim], flat_w1),
+        _build_float_initializer_proto("B_hid1", [1, hidden_dim], hidden_b1.reshape(-1).astype(float).tolist()),
+        _build_float_initializer_proto("W_hid2", [hidden_dim, 1], hidden_w2.reshape(-1).astype(float).tolist()),
+        _build_float_initializer_proto("B_hid2", [1, 1], [float(hidden_b2)]),
+        _build_float_initializer_proto("const_one", [1, 1], [1.0]),
+    ]
+
+    nodes = [
+        _build_node_proto("Gemm", [cfg.input_tensor_name, "W_lin", "B_lin"], ["linear_logit"], "Gemm_Linear"),
+        _build_node_proto("Gemm", [cfg.input_tensor_name, "W_hid1", "B_hid1"], ["hidden_pre"], "Gemm_Hidden1"),
+        _build_node_proto("Tanh", ["hidden_pre"], ["hidden_act"], "Tanh_Hidden1"),
+        _build_node_proto("Gemm", ["hidden_act", "W_hid2", "B_hid2"], ["hidden_logit"], "Gemm_Hidden2"),
+        _build_node_proto("Add", ["linear_logit", "hidden_logit"], ["total_logit"], "Add_Logits"),
+        _build_node_proto("Sigmoid", ["total_logit"], ["prob_pos"], "Sigmoid_Prob1"),
+        _build_node_proto("Sub", ["const_one", "prob_pos"], ["prob_neg"], "Sub_Prob0"),
+        _build_node_proto(
+            "Concat", ["prob_neg", "prob_pos"], [cfg.output_prob_name], "Concat_Probabilities", {"axis": 1}
+        ),
+        _build_node_proto(
+            "ArgMax", [cfg.output_prob_name], [cfg.output_label_name], "ArgMax_Label", {"axis": 1, "keepdims": 0}
+        ),
+    ]
+
+    graph_buf = bytearray()
+    for node_bytes in nodes:
+        graph_buf.extend(_encode_bytes_field(1, node_bytes))
+    graph_buf.extend(_encode_string_field(2, "XAUUSD_Sniper_MetaLabeler_Graph"))
+    for init_bytes in initializers:
+        graph_buf.extend(_encode_bytes_field(5, init_bytes))
+
+    graph_buf.extend(_encode_bytes_field(11, _build_value_info_proto(cfg.input_tensor_name, TENSOR_FLOAT, [1, n_features])))
+    graph_buf.extend(_encode_bytes_field(12, _build_value_info_proto(cfg.output_label_name, TENSOR_INT64, [1])))
+    graph_buf.extend(_encode_bytes_field(12, _build_value_info_proto(cfg.output_prob_name, TENSOR_FLOAT, [1, 2])))
+
+    opset_msg = _encode_string_field(1, "") + _encode_varint_field(2, cfg.target_opset)
+    model_buf = bytearray()
+    model_buf.extend(_encode_varint_field(1, cfg.ir_version))
+    model_buf.extend(_encode_string_field(2, "XAUUSD_Quant_ONNX_Exporter"))
+    model_buf.extend(_encode_string_field(3, "4.22.0"))
+    model_buf.extend(_encode_varint_field(5, 1))
+    model_buf.extend(_encode_bytes_field(7, bytes(graph_buf)))
+    model_buf.extend(_encode_bytes_field(8, opset_msg))
+    return bytes(model_buf)
+
+
 def main() -> None:
     telemetry_candidates = [
-        os.path.join(ARTIFACTS_DIR, "telemetry", "all_2023_2026_setup_telemetry.csv"),
-        os.path.join(ARTIFACTS_DIR, "telemetry", "pass1_setup_telemetry.csv"),
-        os.path.join(ARTIFACTS_DIR, "telemetry", "pass2a_v2_setup_telemetry.csv"),
-        os.path.join(COMMON_FILES, "all_2023_2026_setup_telemetry.csv"),
-        os.path.join(COMMON_FILES, "pass2a_v2_setup_telemetry.csv"),
         os.path.join(COMMON_FILES, "xauusd_setup_telemetry.csv"),
     ]
 
@@ -55,7 +119,7 @@ def main() -> None:
             raw_dfs.append(pd.read_csv(p))
 
     if not raw_dfs:
-        raise FileNotFoundError("No setup telemetry CSV files found in Common\\Files or Documents\\onix_artifacts.")
+        raise FileNotFoundError("No XAUUSD setup telemetry CSV files found in Common\\Files or Documents\\onix_artifacts.")
 
     full_df = pd.concat(raw_dfs, ignore_index=True)
     sigs_all = full_df[full_df["event_stage"] == "SIGNAL_TRIGGERED"].copy()
@@ -63,10 +127,10 @@ def main() -> None:
 
     mt5_outcomes = (
         outs_all.drop_duplicates(subset=["timestamp_utc"], keep="last")
-        .set_index("timestamp_utc")["realized_r_multiple"]
-        .to_dict()
+        .set_index("timestamp_utc")[["realized_r_multiple", "mfe_r"]]
+        .to_dict("index")
     )
-    print(f"Exact MT5 POSITION_CLOSED outcomes mapped: {len(mt5_outcomes)}")
+    print(f"Exact MT5 XAUUSD Real-Tick POSITION_CLOSED outcomes mapped: {len(mt5_outcomes)}")
 
     sigs = (
         sigs_all.drop_duplicates(subset=["timestamp_utc"], keep="last")
@@ -75,230 +139,97 @@ def main() -> None:
     )
     sigs["sig_utc"] = pd.to_datetime(sigs["timestamp_utc"])
     sigs["year"] = sigs["sig_utc"].dt.year
-    sigs["sig_hour"] = sigs["sig_utc"].dt.hour
-    sigs["sig_min"] = sigs["sig_utc"].dt.hour * 60 + sigs["sig_utc"].dt.minute
-
-    in_lon = (sigs["sig_min"] >= 390) & (sigs["sig_min"] <= 655)
-    in_ny = (sigs["sig_min"] >= 720) & (sigs["sig_min"] <= 955)
-    mask_time = in_lon | in_ny
-
-    is_frac = sigs["swept_pool_type"].isin(["M15_SWING_LOW", "M15_SWING_HIGH"])
-    mask_frac = ~(
-        (is_frac & sigs["sig_hour"].isin([6, 7, 8, 9]) & (sigs["f1_wick_body_ratio"] < 0.55))
-        | (is_frac & (sigs["sig_min"] >= 14 * 60 + 20) & (sigs["sig_min"] < 15 * 60))
-    )
-    mask_pool = ~(
-        ((sigs["direction"] == -1) & (sigs["swept_pool_type"] != "EQUAL_HIGHS"))
-        | ((sigs["direction"] == 1) & (sigs["swept_pool_type"] == "EXTERNAL_LVN_LOW"))
-    )
-
-    cand = sigs[mask_time & mask_frac & mask_pool].copy().reset_index(drop=True)
-
-    m1_path = os.path.join(COMMON_FILES, "of_pep_XAUUSD_20230101.csv")
-    has_m1 = os.path.exists(m1_path)
-    if has_m1:
-        m1 = pd.read_csv(m1_path, usecols=["t", "o", "h", "l", "c"])
-        m1_t, m1_o, m1_h, m1_l, m1_c = (
-            m1["t"].values,
-            m1["o"].values,
-            m1["h"].values,
-            m1["l"].values,
-            m1["c"].values,
-        )
-
-    def extract_m1_ticks(srv_ts: int, d: int, limit_px: float, risk: float):
-        if not has_m1:
-            return None, None
-        i0 = np.searchsorted(m1_t, srv_ts)
-        if i0 == 0 or i0 >= len(m1_t):
-            return None, None
-        bar_open = m1_o[i0]
-        ep = None
-        start_k = i0
-        if d == 1:
-            ask = bar_open + 0.18
-            if abs(ask - limit_px) <= 0.85:
-                ep = ask
-            else:
-                for k in range(i0, min(len(m1_t), i0 + 15)):
-                    if m1_l[k] + 0.18 <= limit_px:
-                        ep = limit_px
-                        start_k = k
-                        break
-                    if (m1_h[k] - limit_px) / risk >= 1.50:
-                        return None, None
-        else:
-            bid = bar_open
-            if abs(limit_px - bid) <= 0.85:
-                ep = bid
-            else:
-                for k in range(i0, min(len(m1_t), i0 + 15)):
-                    if m1_h[k] >= limit_px:
-                        ep = limit_px
-                        start_k = k
-                        break
-                    if (limit_px - m1_l[k]) / risk >= 1.50:
-                        return None, None
-        if ep is None:
-            return None, None
-
-        i1 = min(len(m1_t), start_k + 245)
-        fav_r_seq = []
-        for k in range(start_k, i1):
-            if m1_t[k] - m1_t[start_k] > 4 * 3600:
-                break
-            o, h, l, c = m1_o[k], m1_h[k], m1_l[k], m1_c[k]
-            pts = [o, l, h, c] if c >= o else [o, h, l, c]
-            for px in pts:
-                fav_r = ((px - ep) / risk) if d == 1 else ((ep - (px + 0.15)) / risk)
-                fav_r_seq.append(fav_r)
-        return ep, np.array(fav_r_seq, dtype=np.float64)
-
-    def sim_seq(seq):
-        tp1_t, tp1_p, tp1_s = 0.62, 0.35, -0.30
-        be_t, be_s = 0.95, 0.10
-        r0_t, r0_s = 1.32, 0.38
-        r1_t, r1_s = 1.65, 0.78
-        r2_t, r2_s = 2.25, 1.40
-        r3_t, r3_s = 2.80, 2.05
-        tp2_t = 3.50
-        cur_sl = -1.00
-        tp1_done = False
-        for fav_r in seq:
-            if fav_r <= cur_sl:
-                return (tp1_p * tp1_t + (1.0 - tp1_p) * cur_sl - 0.02) if tp1_done else (cur_sl - 0.02)
-            if fav_r >= tp2_t:
-                return (tp1_p * tp1_t + (1.0 - tp1_p) * tp2_t - 0.02) if tp1_done else (tp2_t - 0.02)
-            if not tp1_done and fav_r >= tp1_t:
-                tp1_done = True
-                cur_sl = max(cur_sl, tp1_s)
-            if tp1_done:
-                if fav_r >= be_t:
-                    cur_sl = max(cur_sl, be_s)
-                if fav_r >= r0_t:
-                    cur_sl = max(cur_sl, r0_s)
-                if fav_r >= r1_t:
-                    cur_sl = max(cur_sl, r1_s)
-                if fav_r >= r2_t:
-                    cur_sl = max(cur_sl, r2_s)
-                if fav_r >= r3_t:
-                    cur_sl = max(cur_sl, r3_s)
-        fav_r = seq[-1]
-        return (tp1_p * tp1_t + (1.0 - tp1_p) * fav_r - 0.02) if tp1_done else (fav_r - 0.02)
 
     r_list = []
+    mfe_list = []
     valid_idx = []
-    for idx, r in cand.iterrows():
+    for idx, r in sigs.iterrows():
         ts_str = r["timestamp_utc"]
         if ts_str in mt5_outcomes:
-            r_list.append(float(mt5_outcomes[ts_str]))
+            r_list.append(float(mt5_outcomes[ts_str]["realized_r_multiple"]))
+            mfe_list.append(float(mt5_outcomes[ts_str]["mfe_r"]))
             valid_idx.append(idx)
-        else:
-            utc_ts = int(pd.to_datetime(ts_str).timestamp())
-            _, seq = extract_m1_ticks(
-                utc_ts + 7200,
-                int(r["direction"]),
-                float(r["entry_limit_price"]),
-                float(r["sl_distance_usd"]),
-            )
-            if seq is not None and len(seq) > 0:
-                r_list.append(sim_seq(seq))
-                valid_idx.append(idx)
 
-    cand = cand.iloc[valid_idx].copy().reset_index(drop=True)
+    cand = sigs.iloc[valid_idx].copy().reset_index(drop=True)
     cand["r_opt"] = r_list
+    cand["mfe_opt"] = mfe_list
 
     train_df = cand[cand["year"] >= 2024].copy().reset_index(drop=True)
     X_raw = train_df[FEAT_COLS].values.astype(np.float64)
     r_vals = train_df["r_opt"].values.astype(np.float64)
     yrs = train_df["year"].values
     n, n_features = X_raw.shape
-    hidden_dim = 8
+    hidden_dim = 44
 
     means = X_raw.mean(axis=0)
     stds = np.maximum(1e-4, X_raw.std(axis=0))
     Z = (X_raw - means) / stds
 
-    rng = random.Random(42)
-    z_lin_w = [0.0] * n_features
-    z_lin_b = 0.85
-    z_hid_w1 = [[rng.uniform(-0.35, 0.35) for _ in range(hidden_dim)] for _ in range(n_features)]
-    z_hid_b1 = [rng.uniform(-0.15, 0.15) for _ in range(hidden_dim)]
-    z_hid_w2 = [rng.uniform(-0.45, 0.45) for _ in range(hidden_dim)]
+    rng = np.random.default_rng(42)
+    z_lin_w = np.zeros((n_features, 1), dtype=np.float64)
+    z_lin_b = 0.65
+    z_hid_w1 = rng.uniform(-0.40, 0.40, size=(n_features, hidden_dim))
+    z_hid_b1 = rng.uniform(-0.20, 0.20, size=(1, hidden_dim))
+    z_hid_w2 = rng.uniform(-0.50, 0.50, size=(hidden_dim, 1))
     z_hid_b2 = 0.0
 
-    z_samples = []
-    for i in range(n):
-        rv = float(r_vals[i])
-        yr_boost = 1.35 if yrs[i] == 2024 else 1.0
-        if rv <= 0.0:
-            y_t, w_s = 0.05, 2.45 * yr_boost
-        elif rv >= 0.45:
-            y_t, w_s = 0.96, 3.65 * yr_boost
-        else:
-            y_t, w_s = 0.76, 2.10 * yr_boost
-        z_samples.append((Z[i].tolist(), y_t, w_s, rv))
+    y_t = np.where(r_vals < -0.03, 0.01, np.where(r_vals >= 0.25, 0.98, 0.70)).reshape(-1, 1)
+    yr_boost = np.where(yrs == 2024, 1.35, 1.00)
+    w_s = np.where(r_vals < -0.03, 6.50, np.where(r_vals >= 0.25, 5.40, 3.80)) * yr_boost
+    w_s = w_s.reshape(-1, 1)
+    rv_col = r_vals.reshape(-1, 1)
 
-    lr, l2, epochs = 0.11, 0.0010, 1600
+    lr, l2, epochs = 0.16, 0.00007, 7500
+    inv_n = 1.0 / float(max(1, n))
+
     for epoch in range(epochs):
-        step_lr = lr / (1.0 + 0.0012 * epoch)
-        grad_w_lin = [0.0] * n_features
-        grad_b_lin = 0.0
-        grad_w1 = [[0.0] * hidden_dim for _ in range(n_features)]
-        grad_b1 = [0.0] * hidden_dim
-        grad_w2 = [0.0] * hidden_dim
-        grad_b2 = 0.0
+        step_lr = lr / (1.0 + 0.00035 * epoch)
+        lin_logit = Z @ z_lin_w + z_lin_b
+        pre_hid = np.clip(Z @ z_hid_w1 + z_hid_b1, -15.0, 15.0)
+        h_act = np.tanh(pre_hid)
+        hid_logit = h_act @ z_hid_w2 + z_hid_b2
+        total_logit = np.clip(lin_logit + hid_logit, -35.0, 35.0)
+        prob = 1.0 / (1.0 + np.exp(-total_logit))
 
-        for z_x, y_t, w_s, rv in z_samples:
-            lin_logit = z_lin_b + sum(w * xi for w, xi in zip(z_lin_w, z_x))
-            h_act = [
-                math.tanh(max(-15.0, min(15.0, z_hid_b1[h] + sum(z_hid_w1[f][h] * z_x[f] for f in range(n_features)))))
-                for h in range(hidden_dim)
-            ]
-            hid_logit = z_hid_b2 + sum(w2 * ha for w2, ha in zip(z_hid_w2, h_act))
-            prob = _sigmoid(lin_logit + hid_logit)
+        dyn_w = w_s.copy()
+        lose_mask = (rv_col < -0.03) & (prob > 0.35)
+        dyn_w[lose_mask] *= 1.0 + 46.0 * (prob[lose_mask] - 0.35)
 
-            dyn_w = w_s
-            if rv <= 0.0 and prob > 0.54:
-                dyn_w *= 1.0 + 9.0 * (prob - 0.54)
-            elif rv >= 0.45 and prob < 0.76:
-                dyn_w *= 1.0 + 6.0 * (0.76 - prob)
+        win_big_mask = (rv_col >= 0.25) & (prob < 0.88)
+        dyn_w[win_big_mask] *= 1.0 + 26.0 * (0.88 - prob[win_big_mask])
 
-            err = (prob - y_t) * dyn_w
-            grad_b_lin += err
-            grad_b2 += err
-            for f in range(n_features):
-                grad_w_lin[f] += err * z_x[f]
-            for h in range(hidden_dim):
-                grad_w2[h] += err * h_act[h]
-                d_tanh = (1.0 - h_act[h] * h_act[h]) * z_hid_w2[h] * err
-                grad_b1[h] += d_tanh
-                for f in range(n_features):
-                    grad_w1[f][h] += d_tanh * z_x[f]
+        win_mid_mask = (rv_col >= -0.03) & (rv_col < 0.25) & (prob < 0.64)
+        dyn_w[win_mid_mask] *= 1.0 + 20.0 * (0.64 - prob[win_mid_mask])
 
-        inv_n = 1.0 / float(n)
-        z_lin_b -= step_lr * (grad_b_lin * inv_n)
-        z_hid_b2 -= step_lr * (grad_b2 * inv_n)
-        for f in range(n_features):
-            z_lin_w[f] -= step_lr * (grad_w_lin[f] * inv_n + l2 * z_lin_w[f])
-        for h in range(hidden_dim):
-            z_hid_w2[h] -= step_lr * (grad_w2[h] * inv_n + l2 * z_hid_w2[h])
-            z_hid_b1[h] -= step_lr * (grad_b1[h] * inv_n)
-            for f in range(n_features):
-                z_hid_w1[f][h] -= step_lr * (grad_w1[f][h] * inv_n + l2 * z_hid_w1[f][h])
+        err = (prob - y_t) * dyn_w
 
-    clf = NativeResidualMetaClassifier(seed=42)
-    for f in range(n_features):
-        clf.linear_weights[f] = z_lin_w[f] / stds[f]
-    clf.linear_bias = z_lin_b - sum(z_lin_w[f] * means[f] / stds[f] for f in range(n_features))
-    for h in range(hidden_dim):
-        for f in range(n_features):
-            clf.hidden_w1[f][h] = z_hid_w1[f][h] / stds[f]
-        clf.hidden_b1[h] = z_hid_b1[h] - sum(z_hid_w1[f][h] * means[f] / stds[f] for f in range(n_features))
-        clf.hidden_w2[h] = z_hid_w2[h]
-    clf.hidden_b2 = z_hid_b2
+        grad_w_lin = (Z.T @ err) * inv_n + l2 * z_lin_w
+        grad_b_lin = float(err.sum() * inv_n)
+        grad_w2 = (h_act.T @ err) * inv_n + l2 * z_hid_w2
+        grad_b2 = float(err.sum() * inv_n)
 
-    train_df["prob"] = [clf.predict_proba_pos(row) for row in train_df[FEAT_COLS].values]
+        dh = (err @ z_hid_w2.T) * (1.0 - h_act * h_act)
+        grad_w1 = (Z.T @ dh) * inv_n + l2 * z_hid_w1
+        grad_b1 = dh.sum(axis=0, keepdims=True) * inv_n
+
+        z_lin_w -= step_lr * grad_w_lin
+        z_lin_b -= step_lr * grad_b_lin
+        z_hid_w2 -= step_lr * grad_w2
+        z_hid_b2 -= step_lr * grad_b2
+        z_hid_w1 -= step_lr * grad_w1
+        z_hid_b1 -= step_lr * grad_b1
+
+    # Unscale weights from Z-space back to raw feature space X
+    raw_lin_w = (z_lin_w.reshape(-1) / stds).reshape(n_features, 1)
+    raw_lin_b = float(z_lin_b - np.sum(z_lin_w.reshape(-1) * means / stds))
+    raw_hid_w1 = z_hid_w1 / stds.reshape(-1, 1)
+    raw_hid_b1 = z_hid_b1 - (means.reshape(1, -1) / stds.reshape(1, -1)) @ z_hid_w1
+
+    lin_logit = X_raw @ raw_lin_w + raw_lin_b
+    h_act = np.tanh(np.clip(X_raw @ raw_hid_w1 + raw_hid_b1, -15.0, 15.0))
+    total_logit = np.clip(lin_logit + h_act @ z_hid_w2 + z_hid_b2, -35.0, 35.0)
+    train_df["prob"] = (1.0 / (1.0 + np.exp(-total_logit))).reshape(-1)
+
     for label, sub in [
         ("2024", train_df[train_df["year"] == 2024]),
         ("2025-2026", train_df[train_df["year"] >= 2025]),
@@ -306,16 +237,27 @@ def main() -> None:
     ]:
         t2 = sub[sub["prob"] >= 0.58]
         t1 = sub[sub["prob"] >= 0.72]
-        w2 = (t2["r_opt"] > 0).mean() * 100 if len(t2) else 0.0
-        w1 = (t1["r_opt"] > 0).mean() * 100 if len(t1) else 0.0
+        w2 = (t2["r_opt"] > 0.04).mean() * 100 if len(t2) else 0.0
+        w1 = (t1["r_opt"] > 0.04).mean() * 100 if len(t1) else 0.0
         print(
             f"{label:15s}: T2={len(t2):3d} (WR={w2:5.1f}%, SumR={t2['r_opt'].sum():+6.2f}R) | "
             f"T1={len(t1):3d} (WR={w1:5.1f}%, SumR={t1['r_opt'].sum():+6.2f}R)"
         )
 
-    onnx_out = os.path.join(REPO_EA_DIR, "MQL5", "Files", "models", "xauusd_meta_model.onnx")
-    export_trained_model_to_onnx(clf.to_export_dict(), onnx_out)
-    print(f"Exported ONNX model to: {onnx_out}")
+    onnx_bytes = build_xauusd_onnx_bytes(
+        linear_weights=raw_lin_w,
+        linear_bias=raw_lin_b,
+        hidden_w1=raw_hid_w1,
+        hidden_b1=raw_hid_b1,
+        hidden_w2=z_hid_w2,
+        hidden_b2=z_hid_b2,
+    )
+
+    out_onnx = Path(REPO_EA_DIR) / "MQL5" / "Files" / "models" / "xauusd_meta_model.onnx"
+    out_onnx.parent.mkdir(parents=True, exist_ok=True)
+    out_onnx.write_bytes(onnx_bytes)
+    _verify_onnx_file_if_possible(out_onnx, ONNX_EXPORT_CONFIG)
+    print(f"Exported ONNX model to: {out_onnx} ({len(onnx_bytes)} bytes)")
 
 
 if __name__ == "__main__":

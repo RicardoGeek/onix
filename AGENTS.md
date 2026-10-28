@@ -7,7 +7,17 @@ This document contains the complete system context, Windows VM paths, architectu
 ## 1. Windows VM Environment & Exact File Paths
 
 - **Repository Root**: `c:\Users\faker\Documents\dev\onix`
-- **EA & Python Pipeline Root**: `c:\Users\faker\Documents\dev\onix\xauusd-quant-ea`
+- **Versioned Binary Archive (`bin/`)**: `c:\Users\faker\Documents\dev\onix\bin`
+  - Organized into per-EA subfolders (`bin/XAUUSD_Sniper_ONNX/`, `bin/USDJPY_Sniper_ONNX/`, `bin/BTCUSD_Sniper_ONNX/`, `bin/xauusd_chrysalis_ea/`, `bin/usdjpy_chrysalis_ea/`, `bin/btcusd_chrysalis_ea/`, `bin/aegis_regime_hunter_ea/`).
+  - Every compiled EA release must have its version stamped into the binary filename inside its `bin/<EA_Folder>/` subfolder (e.g., `bin/XAUUSD_Sniper_ONNX/XAUUSD_Sniper_ONNX_v4.21.ex5`, `bin/aegis_regime_hunter_ea/aegis_regime_hunter_ea_v4.00.ex5`) and documented in the corresponding EA's root `CHANGELOG.md`.
+- **EA Directories**:
+  - `c:\Users\faker\Documents\dev\onix\xauusd-quant-ea` (`XAUUSD_Sniper_ONNX`, `CHANGELOG.md`)
+  - `c:\Users\faker\Documents\dev\onix\usdjpy-sniper-ea` (`USDJPY_Sniper_ONNX`, `CHANGELOG.md`)
+  - `c:\Users\faker\Documents\dev\onix\btcusd-sniper-ea` (`BTCUSD_Sniper_ONNX`, `CHANGELOG.md`)
+  - `c:\Users\faker\Documents\dev\onix\chrysalis-moonshot-ea` (`chrysalis_ea`, `CHANGELOG.md`)
+  - `c:\Users\faker\Documents\dev\onix\usdjpy-moonshot-ea` (`usdjpy_chrysalis_ea`, `CHANGELOG.md`)
+  - `c:\Users\faker\Documents\dev\onix\btcusd-moonshot-ea` (`btcusd_chrysalis_ea`, `CHANGELOG.md`)
+  - `c:\Users\faker\Documents\dev\onix\aegis-regime-hunter-ea` (`aegis_regime_hunter_ea`, `CHANGELOG.md`)
 - **External Artifacts & Telemetry Archive (Non-Repo)**: `C:\Users\faker\Documents\onix_artifacts`
   - `C:\Users\faker\Documents\onix_artifacts\reports\` — Strategy Tester HTML reports (`pass_2024_10k.htm`, `pass_2024_50k.htm`, `pass2a_prop.htm`, `pass2b_growth.htm`) & run journals
   - `C:\Users\faker\Documents\onix_artifacts\ini\` — Automated Strategy Tester `.ini` configurations (`tester_2024_10k.ini`, `tester_2024_50k.ini`, `tester_pass2a_prop.ini`, `tester_pass2b_growth.ini`, `tester_collect.ini`, `tester_collect_2024.ini`)
@@ -59,6 +69,10 @@ This document contains the complete system context, Windows VM paths, architectu
    - Input 0: `"input_features"` -> `float32[1, 12]`
    - Output 0: `"label"` -> `int64[1]`
    - Output 1: `"probabilities"` -> `float32[1, 2]`
+6. **Binary Version Archiving (`bin/<EA_Folder>/`) & Per-EA `CHANGELOG.md` Rule**:
+   - Whenever any EA is modified and compiled to a new version (`#property version "X.YY"`):
+     1. Archive the compiled `.ex5` binary in `c:\Users\faker\Documents\dev\onix\bin\<EA_Folder>\<EA_Name>_v<X.YY>.ex5` so any historical version can be restored at any time.
+     2. Add a new version section (`## [vX.YY] — YYYY-MM-DD`) at the top of that EA's root `CHANGELOG.md` explaining the architectural and parameter changes.
 
 ---
 
@@ -166,14 +180,47 @@ This document contains the complete system context, Windows VM paths, architectu
        - `ExecutionManager.mqh` re-anchors `tp1Price` to `m_trade.ResultPrice()` upon fill so random network delay never distorts the `+0.62R` TP1 distance.
      - **28-Unit Native ONNX Meta-Labeler (`train_usdjpy_onnx.py`)**: Trained on `516` closed MT5 Real-Tick + Random-Delay outcomes (`Tier 2 >= 0.56` @ `1.35%` Prop / `1.40%` Growth risk; `Tier 1 >= 0.70` @ `1.95%` Prop / `2.05%` Growth risk), delivering **`+$49,707` (`PF 8.30`, `92.80%` WR, `1.94%` Max Bal DD / `3.09%` Max Eq DD)** in `2024` and **`+$103,219` (`PF 7.82`, `93.21%` WR, `2.09%` Max Bal DD / `3.08%` Max Eq DD)** in `2025–2026` on `$50k` Prop Guard under **Every tick based on real ticks (`Model=4`) + Random Delay (`ExecutionMode=-1`)** with `34/34` green months.
 
+### Lesson 14: `BTCUSD` 24/7 Satoshi Supernova EA (`btcusd_chrysalis_ea v2.00`) — `37.0`-Lot Book Limit, SuperTrend Overdrive & Active Judas Shield
+- **Directory**: `c:\Users\faker\Documents\dev\onix\btcusd-moonshot-ea\MQL5\Experts\btcusd_chrysalis_ea.mq5` (`bin/btcusd_chrysalis_ea/btcusd_chrysalis_ea_v2.00.ex5` and `btcusd_chrysalis_ea_v1.00.ex5`)
+- **Key Engineering Invariants on Pepperstone `BTCUSD`**:
+  1. **Contract Specification & `$360` Seed Shield + `0.80x` Stage-2 Overdrive (`InpBalanceStep = 125.0`, `InpBoostMult = 0.80`)**: On Pepperstone `BTCUSD`, `SYMBOL_TRADE_CONTRACT_SIZE = 1` (`0.01` lot = `0.01 BTC`, `~$1.06–$2.34` margin), which has `3x–5x` less notional exposure per `0.01` lot than Gold (`1 oz`). `OrderLots()` locks lot size to `0.01` BTC while `balance < $360.0` (protecting the `$300` starting deposit), accelerates to `$100` effective blocks (`0.80x` overdrive) between `$550` and `$16,000` when `dd_pct <= 10.0%`, enforces a per-slot SL risk ceiling (`8.20%–9.50%`), and engages a `26%` Drawdown Parachute (`1.25x`).
+  2. **Non-Thrashing `37.0`-Lot `SYMBOL_VOLUME_LIMIT` Book Manager (`FreeDistantPendingVolume()`)**: Pepperstone caps total `open positions + pending orders` on `BTCUSD` at `37.0` lots. Never use an opposite-side deletion bias in `FreeDistantPendingVolume()` (which causes `s=0` `BUY_STOP` and `s=1` `SELL_STOP` to thrash-delete each other once order size exceeds `2.0` lots). Strictly free only pending orders farther from current mid-price than the new order (`if(worstDist <= newDist + 5.0) break;`) and clamp to remaining book volume.
+  3. **Regime-Invariant `1.20%` Dynamic SL + Real-Tick Slippage Compensation (`effFav`) + Active Judas `OrderDelete()` Shield (`InpSessionMode = 6`)**: `EffectiveStopDist()` scales SL as `1.20%` of BTC price (`InpStopPct = 1.20`), `ManagePositions()` compensates up to `0.095%` of `ExecutionMode=-1` stop-order fill slippage (`effFav`) when evaluating `MOD_BE_AT`, and `InpSessionMode = 6` actively shields the 11 high-whipsaw Judas hours (`01, 04, 06, 08, 09, 15, 16, 17, 21, 22, 23`) in the Wall Street ETF regime while preserving `g_trig` strictly for orders actually paused at shield start.
+
+### Lesson 15: `BTCUSD_Sniper_ONNX v1.00` ("The Bart-Hunter") — 3-Killzone Crypto + Spot ETF Liquidity Sweep Sniper
+- **Directory**: `c:\Users\faker\Documents\dev\onix\btcusd-sniper-ea\MQL5\Experts\BTCUSD_Sniper_ONNX.mq5` (`#resource "\\Files\\models\\btcusd_meta_model.onnx"`, archived at `bin/BTCUSD_Sniper_ONNX/BTCUSD_Sniper_ONNX_v1.00.ex5`)
+- **Key Engineering Invariants on `BTCUSD` Sniper**:
+  1. **3 Crypto + Institutional Killzones (`SessionLevels.mqh`)**: Operates during Asian/Tokyo (`00:30–04:25 UTC`), London (`06:30–11:30 UTC`), and New York / Wall Street Spot ETF (`12:30–20:00 UTC`), with Rollover Blackout (`20:55–22:10 UTC`).
+  2. **Zero `Model=1` vs. `Model=4` Real-Tick Feature Skew (`VolumeProfile.mqh` & `FeatureExtractor.mqh`)**: Builds session M1 Volume Profile (`$10.00` bin width) lazily only when `m_state == STATE_SWEEP_DETECTED` and strictly up to closed M1 bar `iTime(PERIOD_M1, 1)`, and floors `f11_spread_to_sl_ratio` at `$25.00` (`MathMax(25.0, currentSpreadUSD) / slDistUSD`).
+  3. **Price-Adaptive SL Floor, `$15.00` Slippage Cushion & Floating-Equity HWM (`SweepSignalEngine.mqh`, `PositionSizer.mqh`, `EquityGuard.mqh`)**: Enforces `idealMinSL = MathMax(140.0, 0.0022 * candidateEntry)` (`[$80, $2,200]`), adds `$15.00` BTC slippage cushion in `PositionSizer.mqh`, re-anchors `tp1Price` to fill price in `ExecutionManager.mqh`, and tracks `m_highWaterMark` via `MathMax(balance, equity)` on every tick so `STAT_EQUITY_DDREL_PERCENT` stays strictly inside `<5.20%` (`3.23%–4.39%` across `191.8M` real ticks).
+
+### Lesson 16: `ADR(20)` Volatility-Proportional Geometry (`v4.24`) & Mandatory `Model=4` Torture Report Standard
+- **Volatility-Proportional Regime Detection (`SessionLevels.mqh` & `SweepSignalEngine.mqh`, `v4.24`)**:
+  - Never hardcode nominal dollar price thresholds (such as `>= $3,900`) to switch between tight-range and expanded-range order geometry. Instead, use **`CSessionLevels::GetAdr20() >= 55.0`** (`14.5x` the `$3.80` baseline `maxImmediateSL` floor). When `ADR(20) >= 55.0` (e.g., May 2025 at `$3,360` Gold with `$80` ADR, or Oct 2025–2026 with `$60–$239` ADR), `BuildSniperOrderGeometry()` anchors pullback limit orders to `m_tracker.levelPrice` (or FVG proximal on the reclaimed side of `m_tracker.levelPrice`) up to `HARD_MAX_SL_DISTANCE_USD`, and `DetectReversalFVGAndMSS()` permits primary-pool (`LIQ_ASIAN_LOW`, `LIQ_PDL`, `LIQ_EQUAL_LOWS` after `10:00 UTC`) displacement reclaims (`m5[0].close > m5[1].high` and body `>= 50%` of range).
+- **Mandatory Backtest Reporting Standard (`Model=4` Torture Standard + `0–100` Score)**:
+  - **Always present `Model=4` (`99%–100%` Real Ticks) + `ExecutionMode=-1` (Random Delay) Torture Results** (both for telemetry generation and verification).
+  - For every backtest report, present **year-by-year (`2024`, `2025`, `2026 YTD`) and aggregate** metrics:
+    1. **Net Profit each year**
+    2. **Trades Opened each year** (actual positions opened `Deals In`, plus MT5 deal legs)
+    3. **Average Trades Per Day** (per trading day `[252/yr]` and per calendar day `[365/yr]`)
+    4. **Average Waiting Time Between Trades** (active market trading days/hours and calendar days/hours)
+    5. **`0–100` Torture Score & Version Delta (`Score / ±Delta`)**:
+       - Sum of 4 rational-saturation sub-scores (`25` pts each):
+         - $S_{\text{profit}} = 25 \times \frac{\text{AnnProfit}}{\text{AnnProfit} + 30000}$
+         - $S_{\text{trades}} = 25 \times \frac{\text{AnnTrades}}{\text{AnnTrades} + 35}$
+         - $S_{\text{freq}} = 25 \times \frac{\text{TradesPerTradingDay}}{\text{TradesPerTradingDay} + 0.15}$
+         - $S_{\text{wait}} = 25 \times \frac{4.0}{\text{WaitTradingDays} + 4.0}$
+       - Always state the score and delta vs. the previous version (e.g., `67.0 / +0.2`).
+
 ---
 
 ## 4. One-Block Restore & Retrain Command Reference
 
 ```powershell
-# 1. Retrain XAUUSD & USDJPY ONNX models from preserved + latest MT5 telemetry
+# 1. Retrain XAUUSD, USDJPY & BTCUSD ONNX models from preserved + latest MT5 telemetry
 C:\Users\faker\mlv\Scripts\python.exe "c:\Users\faker\Documents\dev\onix\xauusd-quant-ea\python_pipeline\retrain_multiyear_onnx.py"
 C:\Users\faker\mlv\Scripts\python.exe "c:\Users\faker\Documents\dev\onix\usdjpy-sniper-ea\python_pipeline\train_usdjpy_onnx.py"
+C:\Users\faker\mlv\Scripts\python.exe "c:\Users\faker\Documents\dev\onix\btcusd-sniper-ea\python_pipeline\train_btcusd_onnx.py"
 
 # 2. Sync sources & ONNX to Pepperstone MT5 Data Folder and compile
 $repo = "c:\Users\faker\Documents\dev\onix\xauusd-quant-ea"

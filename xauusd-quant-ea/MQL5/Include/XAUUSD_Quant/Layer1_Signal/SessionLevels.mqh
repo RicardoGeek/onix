@@ -453,12 +453,12 @@ public:
       if(minOfDay >= 0 && minOfDay < (6 * 60 + 30))
          return SESSION_ASIAN_ACCUMULATION;
 
-      // London Killzone: 06:30 - 10:55 UTC (390 - 655)
-      if(minOfDay >= (6 * 60 + 30) && minOfDay <= (10 * 60 + 55))
+      // London + Pre-NY Overlap Killzone: 06:30 - 11:59 UTC (390 - 719)
+      if(minOfDay >= (6 * 60 + 30) && minOfDay < (12 * 60))
          return SESSION_LONDON_KILLZONE;
 
-      // New York Killzone: 12:00 - 15:55 UTC (720 - 955)
-      if(minOfDay >= (12 * 60) && minOfDay <= (15 * 60 + 55))
+      // New York + London Close Killzone: 12:00 - 16:55 UTC (720 - 1015)
+      if(minOfDay >= (12 * 60) && minOfDay <= (16 * 60 + 55))
          return SESSION_NY_KILLZONE;
 
       return SESSION_OUTSIDE_KILLZONE;
@@ -692,6 +692,7 @@ public:
    double            GetAtrM15() const { return (m_ref.atrM15Current > 0.0 ? m_ref.atrM15Current : 3.00); }
    double            GetAtrH1()  const { return (m_ref.atrH1Current  > 0.0 ? m_ref.atrH1Current  : 6.00); }
    double            GetAtrH4()  const { return (m_ref.atrH4Current  > 0.0 ? m_ref.atrH4Current  : 12.0); }
+   double            GetAdr20()  const { return (m_ref.adr20         > 0.0 ? m_ref.adr20         : 30.0); }
   };
 
 #endif // XAUUSD_QUANT_SESSION_LEVELS_MQH

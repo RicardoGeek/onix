@@ -403,7 +403,7 @@ public:
          lots = NormalizeSymbolLots(m_symbol, MathMax(minVol, clampedLots));
         }
 
-      double maxMarketSlipUSD = MathMax(0.85, 0.22 * setup.slDistanceUSD);
+      double maxMarketSlipUSD = MathMax(1.05, 0.30 * setup.slDistanceUSD);
 
       if(setup.direction == SIGNAL_LONG)
         {

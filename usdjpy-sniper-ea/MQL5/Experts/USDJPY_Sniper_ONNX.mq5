@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Principal Quantitative Systems Engineering"
 #property link      "https://www.mql5.com"
-#property version   "2.00"
-#property description "USDJPY Institutional Liquidity Sweep + M1 Volume Profile + Native ONNX Meta-Labeling EA (v2.00 High-Velocity)"
+#property version   "2.10"
+#property description "USDJPY Institutional Liquidity Sweep + M1 Volume Profile + Native ONNX Meta-Labeling EA (v2.10 Real-Tick)"
 #property description "3 Active Killzones (Tokyo/London/NY) | 1:100 Prop Forex Ready | 3.0% Daily / 6.0% Total DD Ceiling"
 #property strict
 
