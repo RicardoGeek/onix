@@ -5,6 +5,12 @@ Every compiled release binary is stamped and archived in `c:\Users\faker\Documen
 
 ---
 
+## [v2.10] — 2026-11-02 (Goldeen.io Instant Redis Telemetry Integration)
+- **Archived Binary**: in/btcusd_chrysalis_ea/btcusd_chrysalis_ea_v2.10.ex5
+- **Summary**:
+  - Added GoldeenTelemetry.mqh (InpGoldeenToken, InpGoldeenUrl = "https://api.goldeen.io/api/v1/ea/report") tracking all 9 Satoshi Supernova modules (InpMagicNumber .. InpMagicNumber + 20) via non-blocking timer heartbeats and closed deal reconciliation.
+
+---
 ## [v2.00] — 2026-10-27
 ### Binary Archive
 - `bin/btcusd_chrysalis_ea/btcusd_chrysalis_ea_v2.00.ex5`

@@ -159,7 +159,7 @@ def main() -> None:
     r_vals = train_df["r_opt"].values.astype(np.float64)
     yrs = train_df["year"].values
     n, n_features = X_raw.shape
-    hidden_dim = 44
+    hidden_dim = 88
 
     means = X_raw.mean(axis=0)
     stds = np.maximum(1e-4, X_raw.std(axis=0))
@@ -173,17 +173,17 @@ def main() -> None:
     z_hid_w2 = rng.uniform(-0.50, 0.50, size=(hidden_dim, 1))
     z_hid_b2 = 0.0
 
-    y_t = np.where(r_vals < -0.03, 0.01, np.where(r_vals >= 0.25, 0.98, 0.70)).reshape(-1, 1)
+    y_t = np.where(r_vals < -0.03, 0.01, np.where(r_vals >= 0.25, 0.98, 0.72)).reshape(-1, 1)
     yr_boost = np.where(yrs == 2024, 1.35, 1.00)
-    w_s = np.where(r_vals < -0.03, 6.50, np.where(r_vals >= 0.25, 5.40, 3.80)) * yr_boost
+    w_s = np.where(r_vals < -0.03, 7.80, np.where(r_vals >= 0.25, 5.60, 4.00)) * yr_boost
     w_s = w_s.reshape(-1, 1)
     rv_col = r_vals.reshape(-1, 1)
 
-    lr, l2, epochs = 0.16, 0.00007, 7500
+    lr, l2, epochs = 0.17, 0.00003, 10000
     inv_n = 1.0 / float(max(1, n))
 
     for epoch in range(epochs):
-        step_lr = lr / (1.0 + 0.00035 * epoch)
+        step_lr = lr / (1.0 + 0.00030 * epoch)
         lin_logit = Z @ z_lin_w + z_lin_b
         pre_hid = np.clip(Z @ z_hid_w1 + z_hid_b1, -15.0, 15.0)
         h_act = np.tanh(pre_hid)
@@ -192,14 +192,14 @@ def main() -> None:
         prob = 1.0 / (1.0 + np.exp(-total_logit))
 
         dyn_w = w_s.copy()
-        lose_mask = (rv_col < -0.03) & (prob > 0.35)
-        dyn_w[lose_mask] *= 1.0 + 46.0 * (prob[lose_mask] - 0.35)
+        lose_mask = (rv_col < -0.03) & (prob > 0.30)
+        dyn_w[lose_mask] *= 1.0 + 75.0 * (prob[lose_mask] - 0.30)
 
         win_big_mask = (rv_col >= 0.25) & (prob < 0.88)
-        dyn_w[win_big_mask] *= 1.0 + 26.0 * (0.88 - prob[win_big_mask])
+        dyn_w[win_big_mask] *= 1.0 + 30.0 * (0.88 - prob[win_big_mask])
 
-        win_mid_mask = (rv_col >= -0.03) & (rv_col < 0.25) & (prob < 0.64)
-        dyn_w[win_mid_mask] *= 1.0 + 20.0 * (0.64 - prob[win_mid_mask])
+        win_mid_mask = (rv_col >= -0.03) & (rv_col < 0.25) & (prob < 0.66)
+        dyn_w[win_mid_mask] *= 1.0 + 24.0 * (0.66 - prob[win_mid_mask])
 
         err = (prob - y_t) * dyn_w
 

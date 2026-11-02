@@ -54,6 +54,53 @@ private:
       return 0.0;
      }
 
+   //--- Compute UTC+2-aligned 14-period H4 ATR so UTC+1 / UTC+3 brokers match UTC+2 H4 candle boundaries
+   double            ComputeBrokerAgnosticAtrH4() const
+     {
+      int offsetSec = ResolveEffectiveGMTOffsetSeconds(m_brokerGMTOffset);
+      if(offsetSec == 7200)
+         return ReadIndicatorScalar(m_handleAtrH4, 0, 1);
+
+      MqlRates h1[];
+      ArraySetAsSeries(h1, true);
+      int copied = CopyRates(m_symbol, PERIOD_H1, 1, 72, h1);
+      if(copied < 64)
+         return ReadIndicatorScalar(m_handleAtrH4, 0, 1);
+
+      int startIdx = -1;
+      for(int i = 0; i < 4 && i < copied; i++)
+        {
+         datetime barUtc = h1[i].time - offsetSec;
+         datetime barUtcPlus2 = barUtc + 7200;
+         MqlDateTime dt;
+         TimeToStruct(barUtcPlus2, dt);
+         if((dt.hour % 4) == 3)
+           {
+            startIdx = i;
+            break;
+           }
+        }
+      if(startIdx < 0 || (startIdx + 15 * 4) > copied)
+         return ReadIndicatorScalar(m_handleAtrH4, 0, 1);
+
+      double sumTR = 0.0;
+      for(int b = 0; b < 14; b++)
+        {
+         int baseIdx = startIdx + b * 4;
+         double bHigh = h1[baseIdx].high;
+         double bLow  = h1[baseIdx].low;
+         for(int k = 1; k < 4; k++)
+           {
+            if(h1[baseIdx + k].high > bHigh) bHigh = h1[baseIdx + k].high;
+            if(h1[baseIdx + k].low  < bLow)  bLow  = h1[baseIdx + k].low;
+           }
+         double prevClose = h1[baseIdx + 4].close;
+         double tr = MathMax(bHigh - bLow, MathMax(MathAbs(bHigh - prevClose), MathAbs(bLow - prevClose)));
+         sumTR += tr;
+        }
+      return sumTR / 14.0;
+     }
+
    //--- Compute 20-Day Average Daily Range (ADR 20)
    double            ComputeADR20() const
      {
@@ -117,8 +164,9 @@ private:
       dtUTC.hour = 0;
       dtUTC.min  = 0;
       dtUTC.sec  = 0;
-      datetime todayStartUTC = StructToTime(dtUTC);
-      datetime asianEndUTC   = todayStartUTC + 6 * 3600 + 30 * 60; // 06:30 UTC
+      datetime todayStartUTC    = StructToTime(dtUTC);
+      datetime asianOpenEndUTC  = todayStartUTC + 1 * 3600 + 30 * 60; // 01:30 UTC (Tokyo Opening Range Lock)
+      datetime asianEndUTC      = todayStartUTC + 6 * 3600 + 30 * 60; // 06:30 UTC (Full Asian Range Lock)
 
       if(todayStartUTC != m_currentDayStartUTC)
         {
@@ -136,7 +184,7 @@ private:
 
       m_currentDayStartUTC = todayStartUTC;
       m_ref.sessionDateUTC = todayStartUTC;
-      m_ref.asianComplete  = (utcNow >= asianEndUTC);
+      m_ref.asianComplete  = (utcNow >= asianOpenEndUTC);
 
       // Convert UTC Asian window to Broker Server Time for CopyRates
       datetime serverTodayStart = UTCTimeToServer(todayStartUTC, m_brokerGMTOffset);
@@ -155,19 +203,22 @@ private:
            }
          if(aHigh > aLow && aLow > 0.0)
            {
+            if(aHigh > m_ref.asianHigh + 0.35) m_asianHighSweptToday = false;
+            if(m_ref.asianLow <= 0.0 || aLow < m_ref.asianLow - 0.35) m_asianLowSweptToday = false;
             m_ref.asianHigh  = aHigh;
             m_ref.asianLow   = aLow;
             m_ref.asianRange = aHigh - aLow;
            }
         }
 
-      // Compute completed London Session High/Low (06:30 - 11:30 UTC) ONLY once NY Killzone begins (> 11:30 UTC)
-      datetime londonEndUTC = todayStartUTC + 11 * 3600 + 30 * 60;
-      m_londonComplete      = (utcNow >= londonEndUTC);
+      // Compute London Session High/Low (from 06:30 UTC onward once >= 09:30 UTC, locking full London range at 11:30 UTC)
+      datetime londonEarlyLockUTC = todayStartUTC + 9 * 3600 + 30 * 60;
+      datetime londonEndUTC       = todayStartUTC + 11 * 3600 + 30 * 60;
+      m_londonComplete            = (utcNow >= londonEarlyLockUTC);
       if(m_londonComplete)
         {
          datetime serverLondonStart = UTCTimeToServer(asianEndUTC, m_brokerGMTOffset);
-         datetime serverLondonEnd   = UTCTimeToServer(londonEndUTC, m_brokerGMTOffset);
+         datetime serverLondonEnd   = UTCTimeToServer(MathMin(utcNow, londonEndUTC), m_brokerGMTOffset);
          MqlRates lonRates[];
          int copiedLon = CopyRates(m_symbol, PERIOD_M5, serverLondonStart, serverLondonEnd, lonRates);
          if(copiedLon > 0)
@@ -181,6 +232,8 @@ private:
               }
             if(lHigh > lLow && lLow > 0.0)
               {
+               if(lHigh > m_londonHigh + 0.35) m_londonHighSweptToday = false;
+               if(m_londonLow <= 0.0 || lLow < m_londonLow - 0.35) m_londonLowSweptToday = false;
                m_londonHigh = lHigh;
                m_londonLow  = lLow;
               }
@@ -254,11 +307,17 @@ private:
 
       double equalToleranceUSD = m_equalLevelAtrRatio * MathMax(m_ref.atrM15Current, 1.0);
 
+      datetime utcNow = ResolveCurrentUTCTime(m_brokerGMTOffset);
+      MqlDateTime dtUTC;
+      TimeToStruct(utcNow, dtUTC);
+      int minOfDay = dtUTC.hour * 60 + dtUTC.min;
+
       double asianMid       = (m_ref.asianHigh > 0.0 && m_ref.asianLow > 0.0)
                               ? (0.50 * (m_ref.asianHigh + m_ref.asianLow)) : 0.0;
-      double asianInnerHalf = 0.25 * m_ref.asianRange;
+      // Only enforce inner Asian core exclusion during Early London Open (06:30-08:30 UTC)
+      double asianInnerHalf = (minOfDay >= 390 && minOfDay <= 510) ? (0.18 * m_ref.asianRange) : 0.0;
 
-      // Extract 5-bar fractals from M15 series (shift 2..copied-3)
+      // Extract confirmed 5-bar fractals from M15 series (shift 2..copied-3)
       for(int i = 2; i < copied - 2; i++)
         {
          // --- Check 5-Bar Fractal Swing High ---
@@ -301,7 +360,7 @@ private:
                  }
                if(!mergedCluster)
                  {
-                  bool outsideAsianCore = (asianMid <= 0.0 || MathAbs(fHigh - asianMid) >= asianInnerHalf);
+                  bool outsideAsianCore = (asianMid <= 0.0 || asianInnerHalf <= 0.0 || MathAbs(fHigh - asianMid) >= asianInnerHalf);
                   if(outsideAsianCore)
                      AddLiquidityPool(fHigh, m15[i].time, LIQ_M15_SWING_HIGH, 1, false);
                  }
@@ -348,7 +407,7 @@ private:
                  }
                if(!mergedCluster)
                  {
-                  bool outsideAsianCore = (asianMid <= 0.0 || MathAbs(fLow - asianMid) >= asianInnerHalf);
+                  bool outsideAsianCore = (asianMid <= 0.0 || asianInnerHalf <= 0.0 || MathAbs(fLow - asianMid) >= asianInnerHalf);
                   if(outsideAsianCore)
                      AddLiquidityPool(fLow, m15[i].time, LIQ_M15_SWING_LOW, 1, false);
                  }
@@ -449,22 +508,30 @@ public:
       if(minOfDay >= (20 * 60 + 55) && minOfDay <= (22 * 60 + 10))
          return SESSION_ROLLOVER_BLACKOUT;
 
-      // Asian Session Accumulation: 00:00 - 06:30 UTC (0 - 389)
-      if(minOfDay >= 0 && minOfDay < (6 * 60 + 30))
+      // Initial Asian Opening Range Accumulation: 00:00 - 01:29 UTC (0 - 89)
+      if(minOfDay >= 0 && minOfDay < (1 * 60 + 30))
+         return SESSION_ASIAN_ACCUMULATION;
+
+      // Tokyo Open Impulse Killzone: 01:30 - 02:55 UTC (90 - 175)
+      if(minOfDay >= (1 * 60 + 30) && minOfDay <= (2 * 60 + 55))
+         return SESSION_LONDON_KILLZONE;
+
+      // Asian Mid-Session Accumulation: 02:56 - 06:29 UTC (176 - 389)
+      if(minOfDay > (2 * 60 + 55) && minOfDay < (6 * 60 + 30))
          return SESSION_ASIAN_ACCUMULATION;
 
       // London + Pre-NY Overlap Killzone: 06:30 - 11:59 UTC (390 - 719)
       if(minOfDay >= (6 * 60 + 30) && minOfDay < (12 * 60))
          return SESSION_LONDON_KILLZONE;
 
-      // New York + London Close Killzone: 12:00 - 16:55 UTC (720 - 1015)
-      if(minOfDay >= (12 * 60) && minOfDay <= (16 * 60 + 55))
+      // New York + London Close Killzone: 12:00 - 15:55 UTC (720 - 955)
+      if(minOfDay >= (12 * 60) && minOfDay <= (15 * 60 + 55))
          return SESSION_NY_KILLZONE;
 
       return SESSION_OUTSIDE_KILLZONE;
      }
 
-   //--- Return true if currently inside London or NY Killzone
+   //--- Return true if currently inside Tokyo, London or NY Killzone
    bool              IsInActiveKillzone(const datetime utcNow) const
      {
       ENUM_KILLZONE_SESSION s = ClassifyKillzoneSession(utcNow);
@@ -484,15 +551,17 @@ public:
       datetime m5BarTime  = iTime(m_symbol, PERIOD_M5,  0);
       datetime m15BarTime = iTime(m_symbol, PERIOD_M15, 0);
 
+      bool m5Updated = false;
       if(m5BarTime != m_lastM5UpdateBarTime || m_ref.atrM5Current <= 0.0)
         {
          m_lastM5UpdateBarTime = m5BarTime;
          m_ref.atrM5Current    = ReadIndicatorScalar(m_handleAtrM5,  0, 1);
          m_ref.atrM15Current   = ReadIndicatorScalar(m_handleAtrM15, 0, 1);
          m_ref.atrH1Current    = ReadIndicatorScalar(m_handleAtrH1,  0, 1);
-         m_ref.atrH4Current    = ReadIndicatorScalar(m_handleAtrH4,  0, 1);
+         m_ref.atrH4Current    = ComputeBrokerAgnosticAtrH4();
 
          UpdateDailyAndAsianBoundaries(utcNow);
+         m5Updated = true;
         }
 
       if(m15BarTime != m_lastM15UpdateBarTime || m_poolCount == 0)
@@ -512,9 +581,10 @@ public:
                                          m_ref.atrM15Current < m_ref.atrM15Percentile5th);
 
          m_ref.isTradableRegime = (!m_ref.isAsianExhausted && !m_ref.isVolatilityCompressed);
-
-         RebuildLiquidityPools();
         }
+
+      if(m5Updated || m_poolCount == 0)
+         RebuildLiquidityPools();
      }
 
    //+------------------------------------------------------------------+

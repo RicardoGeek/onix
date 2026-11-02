@@ -13,7 +13,7 @@
 //+------------------------------------------------------------------+
 //| Global System & Mathematical Constants                           |
 //+------------------------------------------------------------------+
-#define QUANT_EA_VERSION                 "1.10"
+#define QUANT_EA_VERSION                 "2.02"
 #define QUANT_DEFAULT_MAGIC              20260901
 #define QUANT_EPSILON                    1e-9
 #define ONNX_FEATURE_COUNT               12
@@ -32,10 +32,10 @@
 #define PROP_TOTAL_DD_BREAKER_PCT        5.20
 #define GROWTH_TOTAL_DD_BREAKER_PCT      5.40
 
-//--- Sniper Stop-Loss Guardrails (in USD price distance on BTCUSD: $80 to $2,200)
-#define HARD_MIN_SL_DISTANCE_USD         80.00
+//--- Sniper Stop-Loss Guardrails (in USD price distance on BTCUSD: $65 to $2,200)
+#define HARD_MIN_SL_DISTANCE_USD         65.00
 #define HARD_MAX_SL_DISTANCE_USD         2200.00
-#define IDEAL_MIN_SL_DISTANCE_USD        140.00
+#define IDEAL_MIN_SL_DISTANCE_USD        105.00
 #define IDEAL_MAX_SL_DISTANCE_USD        950.00
 
 //--- ONNX Meta-Labeler Probability Thresholds

@@ -37,51 +37,44 @@ private:
 
    double        EvaluateDeterministicScore(const SStationaryFeatures &f) const
      {
-      double logit = 0.35;
+      // Base prior ensures all valid Layer-1 structural sweeps execute in Pass-1 data collection
+      double logit = 0.62;
 
-      if(f.f0_sweep_depth_norm >= 0.12 && f.f0_sweep_depth_norm <= 0.48)
+      if(f.f0_sweep_depth_norm >= 0.08 && f.f0_sweep_depth_norm <= 0.60)
          logit += 0.22;
-      else if(f.f0_sweep_depth_norm > 0.72)
-         logit -= 0.18;
+      else if(f.f0_sweep_depth_norm > 0.85)
+         logit -= 0.10;
 
-      logit += (f.f1_wick_body_ratio - 0.38) * 0.85;
+      logit += (f.f1_wick_body_ratio - 0.30) * 0.65;
 
-      if(f.f2_bars_outside_level <= 0.50)
-         logit += 0.22;
-      else
-         logit -= (f.f2_bars_outside_level - 0.50) * 0.75;
-
-      if(f.f3_rel_tick_volume >= 1.20 && f.f3_rel_tick_volume <= 2.40)
-         logit += 0.14;
-
-      if(f.f4_vpoc_distance_norm >= 0.40)
-         logit += 0.12;
-
-      if(f.f5_value_area_width_norm >= 0.35 && f.f5_value_area_width_norm <= 1.95)
-         logit += 0.24;
-      else if(f.f5_value_area_width_norm > 2.05)
-         logit -= 0.42;
-
-      if(f.f6_h1_adx >= 0.22 && f.f6_h1_adx <= 0.46)
-         logit += 0.18;
-
-      if(f.f7_hurst_exponent >= 0.33)
+      if(f.f2_bars_outside_level <= 0.55)
          logit += 0.20;
       else
-         logit -= 0.18;
+         logit -= (f.f2_bars_outside_level - 0.55) * 0.35;
 
-      if(f.f8_volatility_ratio <= 0.30)
-         logit += 0.15;
-      else
-         logit -= 0.20;
+      if(f.f3_rel_tick_volume >= 1.05 && f.f3_rel_tick_volume <= 2.80)
+         logit += 0.14;
 
-      if(f.f11_spread_to_sl_ratio >= 0.015 && f.f11_spread_to_sl_ratio <= 0.140)
-         logit += 0.22;
-      else if(f.f11_spread_to_sl_ratio > 0.18)
-         logit -= (f.f11_spread_to_sl_ratio - 0.18) * 2.00;
+      if(f.f4_vpoc_distance_norm >= 0.30)
+         logit += 0.12;
+
+      if(f.f5_value_area_width_norm >= 0.25 && f.f5_value_area_width_norm <= 2.20)
+         logit += 0.20;
+
+      if(f.f6_h1_adx >= 0.18 && f.f6_h1_adx <= 0.55)
+         logit += 0.16;
+
+      if(f.f7_hurst_exponent >= 0.30)
+         logit += 0.18;
+
+      if(f.f8_volatility_ratio <= 0.38)
+         logit += 0.14;
+
+      if(f.f11_spread_to_sl_ratio >= 0.015 && f.f11_spread_to_sl_ratio <= 0.180)
+         logit += 0.18;
 
       double prob = 1.0 / (1.0 + MathExp(-logit));
-      return MathMax(0.01, MathMin(0.99, prob));
+      return MathMax(0.58, MathMin(0.99, prob));
      }
 
 public:

@@ -5,6 +5,12 @@ Archived version-stamped binaries are stored in [`/bin/`](../bin/).
 
 ---
 
+## [v3.10] — 2026-11-02 (Goldeen.io Instant Redis Telemetry Integration)
+- **Archived Binary**: in/xauusd_chrysalis_ea/chrysalis_ea_v3.10.ex5
+- **Summary**:
+  - Added GoldeenTelemetry.mqh (InpGoldeenToken, InpGoldeenUrl = "https://api.goldeen.io/api/v1/ea/report") tracking all 9 modules (InpMagicNumber .. InpMagicNumber + 20) via non-blocking timer heartbeats and closed deal reconciliation.
+
+---
 ## [v3.00] — 2026-10-26 (9-Module Supernova Moonshot & Zero-Interference Drought-Breaker Edition)
 - **Archived Binary**: `bin/xauusd_chrysalis_ea/chrysalis_ea_v3.00.ex5`
 - **Summary**:

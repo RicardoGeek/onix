@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Principal Quantitative Systems Engineering"
 #property link      "https://www.mql5.com"
-#property version   "1.10"
-#property description "BTCUSD Institutional Liquidity Sweep ('Bart-Hunter') + M1 Volume Profile + Native ONNX Meta-Labeler (v1.10)"
+#property version   "2.02"
+#property description "BTCUSD Institutional Liquidity Sweep ('Bart-Hunter') + M1 Volume Profile + Native ONNX Meta-Labeler (v2.00)"
 #property description "3 Active Killzones (Asia/London/Wall St ETF) | Prop & Growth Ready | 3.0% Daily / 6.0% Total DD Ceiling"
 #property strict
 
@@ -16,6 +16,7 @@
 //--- Modular Architecture Includes
 #include "../Include/BTCUSD_Quant/Core/Definitions.mqh"
 #include "../Include/BTCUSD_Quant/Core/Logger.mqh"
+#include "../Include/BTCUSD_Quant/Core/GoldeenTelemetry.mqh"
 #include "../Include/BTCUSD_Quant/Layer1_Signal/SessionLevels.mqh"
 #include "../Include/BTCUSD_Quant/Layer1_Signal/VolumeProfile.mqh"
 #include "../Include/BTCUSD_Quant/Layer1_Signal/SweepSignalEngine.mqh"
@@ -55,8 +56,8 @@ input int            InpVerticalBarrierHours      = 4;                  // Verti
 
 input group "=== [4] MICROSTRUCTURE, ROLLOVER & NEWS GUARDS ==="
 input bool           InpEnableCalendarFilter      = true;               // Block Entries +/- 15m Around High-Impact USD News
-input double         InpMaxSpreadMultiplier       = 1.80;               // Max Allowed Spread vs 5-Min Rolling Average
-input double         InpHardMaxSpreadUSD          = 65.00;              // Hard Absolute Spread Ceiling on BTCUSD ($65.00 USD)
+input double         InpMaxSpreadMultiplier       = 2.20;               // Max Allowed Spread vs 5-Min Rolling Average
+input double         InpHardMaxSpreadUSD          = 95.00;              // Hard Absolute Spread Ceiling on BTCUSD ($95.00 USD)
 
 input group "=== [5] EXECUTION, TELEMETRY & DIAGNOSTICS ==="
 input ulong          InpMagicNumber               = QUANT_DEFAULT_MAGIC;// Unique EA Magic Number
@@ -65,6 +66,10 @@ input bool           InpEnableCsvTelemetry        = true;               // Write
 input bool           InpCsvUseCommonFolder        = false;              // Write CSVs to Terminal FILE_COMMON Directory
 input ENUM_LOG_LEVEL InpLogLevel                  = LOG_INFO;           // Minimum Journal Logging Verbosity
 input bool           InpShowChartHUD              = true;               // Render Real-Time Institutional HUD on Chart
+
+input group "=== [6] GOLDEEN.IO FLEET TELEMETRY (REDIS INSTANT QUEUE) ==="
+input string         InpGoldeenToken              = "";                 // Goldeen.io EA Token (gld_ea_... | Empty = Disabled)
+input string         InpGoldeenUrl                = "https://api.goldeen.io/api/v1/ea/report"; // Goldeen Telemetry Endpoint
 
 //+------------------------------------------------------------------+
 //| Global Modular Subsystem Instances                               |
@@ -78,8 +83,14 @@ COnnxMetaLabeler   g_onnxLabeler;
 CEquityGuard       g_equityGuard;
 CPositionSizer     g_positionSizer;
 CExecutionManager  g_executionManager;
+CGoldeenTelemetry  g_goldeen;
 
-datetime           g_lastHudUpdateTime = 0;
+datetime              g_lastHudUpdateTime = 0;
+datetime              g_lastModelCallTime = 0;
+SOnnxPrediction       g_lastPrediction;
+ulong                 g_lastEvalSetupId   = 0;
+ENUM_SIGNAL_DIRECTION g_lastEvalDir       = SIGNAL_NONE;
+ENUM_LIQUIDITY_TYPE   g_lastEvalPool      = LIQ_NONE;
 
 //+------------------------------------------------------------------+
 //| Render Real-Time Institutional Telemetry HUD                     |
@@ -107,12 +118,32 @@ void UpdateChartHUD()
    double   effOffsetHrs = ResolveEffectiveGMTOffsetHours(InpBrokerGMTOffsetHours);
    datetime utcNow       = ResolveCurrentUTCTime(InpBrokerGMTOffsetHours);
 
+   string lastCallStr  = "NONE YET";
+   string lastDecisStr = StringFormat("Awaiting Setup (Thr: %.2f / %.2f)", InpOnnxTier2Threshold, InpOnnxTier1Threshold);
+   if(g_lastModelCallTime > 0)
+     {
+      lastCallStr = StringFormat("%s UTC (%s %s #%I64u)",
+                                 TimeToString(g_lastModelCallTime, TIME_DATE|TIME_MINUTES),
+                                 DirectionToString(g_lastEvalDir),
+                                 LiquidityTypeToString(g_lastEvalPool),
+                                 g_lastEvalSetupId);
+      string verdict = (g_lastPrediction.riskTier == 1) ? "APPROVED TIER-1" :
+                       ((g_lastPrediction.riskTier == 2) ? "APPROVED TIER-2" : "REJECTED");
+      lastDecisStr = StringFormat("Score: %.4f | Thr: %.2f/%.2f -> %s",
+                                  g_lastPrediction.winProbability,
+                                  InpOnnxTier2Threshold,
+                                  InpOnnxTier1Threshold,
+                                  verdict);
+     }
+
    string hud = StringFormat(
       "========================================================\n"
       " BTCUSD HYBRID QUANTITATIVE SNIPER EA v%s (ONNX)\n"
       "========================================================\n"
       " [MODE]       : %s (%s)\n"
       " [ONNX AI]    : %s | Ready: %s\n"
+      " [LAST CALL]  : %s\n"
+      " [LAST DECIS] : %s\n"
       " [CLOCK / GMT]: UTC%+.2f (%s) | Server: %s | UTC: %s\n"
       " [SESSION]    : %s | Tradable Regime: %s\n"
       "--------------------------------------------------------\n"
@@ -136,6 +167,8 @@ void UpdateChartHUD()
       (riskSnap.ddType == DD_TRAILING_HWM ? "TRAILING_HWM" : "STATIC_INITIAL"),
       (InpUseOnnxModel ? "NATIVE_ONNX" : "DETERMINISTIC_COLLECTION"),
       (g_onnxLabeler.IsModelReady() ? "YES" : "FALLBACK"),
+      lastCallStr,
+      lastDecisStr,
       effOffsetHrs,
       (MQLInfoInteger(MQL_TESTER) ? "TESTER_CFG" : "AUTO_GMT"),
       TimeToString(now, TIME_MINUTES),
@@ -308,6 +341,17 @@ int OnInit()
       "BTCUSD_Sniper_ONNX v%s Initialized Successfully [Mode=%s | UseONNX=%s]",
       QUANT_EA_VERSION, RiskModeToString(InpRiskMode), (InpUseOnnxModel ? "TRUE" : "FALSE")));
 
+   g_goldeen.Init(InpGoldeenToken,
+                  InpGoldeenUrl,
+                  "BTCUSD_Sniper_ONNX",
+                  QUANT_EA_VERSION,
+                  "Sniper ONNX",
+                  _Symbol,
+                  InpMagicNumber,
+                  InpMagicNumber);
+   if(g_goldeen.IsEnabled())
+      EventSetTimer(2);
+
    UpdateChartHUD();
    return INIT_SUCCEEDED;
   }
@@ -317,6 +361,8 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   if(g_goldeen.IsEnabled())
+      EventKillTimer();
    g_onnxLabeler.Deinit();
    g_featureExtractor.Deinit();
    g_sessionLevels.Deinit();
@@ -369,6 +415,12 @@ void OnTick()
    SOnnxPrediction prediction;
    g_onnxLabeler.PredictProbability(features, prediction);
 
+   g_lastModelCallTime = ResolveCurrentUTCTime(InpBrokerGMTOffsetHours);
+   g_lastPrediction    = prediction;
+   g_lastEvalSetupId   = candidateSetup.setupId;
+   g_lastEvalDir       = candidateSetup.direction;
+   g_lastEvalPool      = candidateSetup.sweptPoolType;
+
    g_logger.WriteSetupTelemetryCSV(candidateSetup, features, prediction, "SIGNAL_TRIGGERED");
 
    if(prediction.riskTier == 0 || prediction.winProbability < InpOnnxTier2Threshold)
@@ -420,6 +472,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeResult &result)
   {
    g_executionManager.OnTradeTransaction(trans, request, result);
+   g_goldeen.OnTradeTransactionWatch(trans);
 
    ENUM_SIGNAL_DIRECTION closedDir = SIGNAL_NONE;
    double closedR = 0.0;
@@ -427,6 +480,40 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       g_sweepEngine.NotifyTradeOutcome(closedDir, closedR, ResolveCurrentUTCTime(InpBrokerGMTOffsetHours));
   }
 
+
+//+------------------------------------------------------------------+
+//| Timer function: Non-Blocking Goldeen.io Telemetry Sync           |
+//+------------------------------------------------------------------+
+void OnTimer()
+  {
+   if(!g_goldeen.IsEnabled())
+      return;
+
+   SRiskStateSnapshot riskSnap;
+   g_equityGuard.GetRiskStateSnapshot(riskSnap);
+
+   string lastDecisStr = StringFormat("Awaiting Setup (Thr: %.2f / %.2f)", InpOnnxTier2Threshold, InpOnnxTier1Threshold);
+   if(g_lastModelCallTime > 0)
+     {
+      string verdict = (g_lastPrediction.riskTier == 1) ? "APPROVED TIER-1" :
+                       ((g_lastPrediction.riskTier == 2) ? "APPROVED TIER-2" : "REJECTED");
+      lastDecisStr = StringFormat("Score: %.4f -> %s", g_lastPrediction.winProbability, verdict);
+     }
+
+   string statusStr = (riskSnap.tradingHaltedToday || riskSnap.permanentLockout)
+                      ? ("HALTED: " + BreachReasonToString(riskSnap.activeBreachReason))
+                      : SweepStateToString(g_sweepEngine.GetCurrentState());
+
+   g_goldeen.OnTimerCheck(riskSnap.highWaterMark,
+                          riskSnap.dailyRealizedPnLUSD,
+                          riskSnap.dailyRealizedPnLPct,
+                          riskSnap.dailyDrawdownPct,
+                          3.00,
+                          riskSnap.totalDrawdownPct,
+                          HARD_MAX_TOTAL_DD_CEILING_PCT,
+                          lastDecisStr,
+                          statusStr);
+  }
 //+------------------------------------------------------------------+
 //| Tester function: Institutional Prop-Safe Optimization Criterion  |
 //+------------------------------------------------------------------+

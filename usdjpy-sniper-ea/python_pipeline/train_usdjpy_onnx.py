@@ -110,7 +110,6 @@ def build_usdjpy_onnx_bytes(
 
 def main() -> None:
     telemetry_candidates = [
-        os.path.join(ARTIFACTS_DIR, "telemetry", "usdjpy_pass1_setup_telemetry.csv"),
         os.path.join(COMMON_FILES, "usdjpy_setup_telemetry.csv"),
     ]
 
@@ -120,7 +119,7 @@ def main() -> None:
             raw_dfs.append(pd.read_csv(p))
 
     if not raw_dfs:
-        raise FileNotFoundError("No USDJPY setup telemetry CSV files found in Common\\Files or Documents\\onix_artifacts.")
+        raise FileNotFoundError("No USDJPY setup telemetry CSV files found in Common\\Files.")
 
     full_df = pd.concat(raw_dfs, ignore_index=True)
     sigs_all = full_df[full_df["event_stage"] == "SIGNAL_TRIGGERED"].copy()
@@ -161,12 +160,12 @@ def main() -> None:
     raw_spread = cand["f11_spread_to_sl_ratio"].values.astype(np.float64) * sl_dist
     cand["f11_spread_to_sl_ratio"] = np.clip(np.maximum(0.020, raw_spread) / sl_dist, 0.0, 1.0)
 
-    train_df = cand[cand["year"] >= 2023].copy().reset_index(drop=True)
+    train_df = cand[cand["year"] >= 2024].copy().reset_index(drop=True)
     X_raw = train_df[FEAT_COLS].values.astype(np.float64)
     r_vals = train_df["r_opt"].values.astype(np.float64)
     yrs = train_df["year"].values
     n, n_features = X_raw.shape
-    hidden_dim = 28
+    hidden_dim = 88
 
     mask_24_26 = yrs >= 2024
     means = X_raw[mask_24_26].mean(axis=0)
@@ -175,25 +174,23 @@ def main() -> None:
 
     rng = np.random.default_rng(42)
     z_lin_w = np.zeros((n_features, 1), dtype=np.float64)
-    z_lin_b = 0.65
-    z_hid_w1 = rng.uniform(-0.40, 0.40, size=(n_features, hidden_dim))
-    z_hid_b1 = rng.uniform(-0.20, 0.20, size=(1, hidden_dim))
-    z_hid_w2 = rng.uniform(-0.50, 0.50, size=(hidden_dim, 1))
+    z_lin_b = 0.25
+    z_hid_w1 = rng.uniform(-0.45, 0.45, size=(n_features, hidden_dim))
+    z_hid_b1 = rng.uniform(-0.25, 0.25, size=(1, hidden_dim))
+    z_hid_w2 = rng.uniform(-0.55, 0.55, size=(hidden_dim, 1))
     z_hid_b2 = 0.0
 
-    y_t = np.where(r_vals <= 0.04, 0.01, np.where(r_vals >= 0.20, 0.98, 0.90)).reshape(-1, 1)
+    y_t = np.where(r_vals <= 0.04, 0.005, np.where(r_vals >= 0.20, 0.99, 0.92)).reshape(-1, 1)
     yr_boost = np.where(yrs >= 2024, 2.50, 0.25)
-    ym_strs = train_df["sig_utc"].dt.strftime("%Y-%m").values
-    quiet_boost = np.where(np.isin(ym_strs, ["2024-04", "2025-04", "2026-02", "2026-04"]) & (r_vals > 0.04), 1.65, 1.0)
-    w_s = np.where(r_vals <= 0.04, 5.50, np.where(r_vals >= 0.20, 5.20, 4.00)) * yr_boost * quiet_boost
+    w_s = np.where(r_vals <= 0.04, 9.50, np.where(r_vals >= 0.20, 5.20, 4.00)) * yr_boost
     w_s = w_s.reshape(-1, 1)
     rv_col = r_vals.reshape(-1, 1)
 
-    lr, l2, epochs = 0.16, 0.00012, 5200
+    lr, l2, epochs = 0.22, 0.00003, 10000
     inv_n = 1.0 / float(max(1, n))
 
     for epoch in range(epochs):
-        step_lr = lr / (1.0 + 0.00045 * epoch)
+        step_lr = lr / (1.0 + 0.00025 * epoch)
         lin_logit = Z @ z_lin_w + z_lin_b
         pre_hid = np.clip(Z @ z_hid_w1 + z_hid_b1, -15.0, 15.0)
         h_act = np.tanh(pre_hid)
@@ -202,14 +199,14 @@ def main() -> None:
         prob = 1.0 / (1.0 + np.exp(-total_logit))
 
         dyn_w = w_s.copy()
-        lose_mask = (rv_col <= 0.04) & (prob > 0.38)
-        dyn_w[lose_mask] *= 1.0 + 32.0 * (prob[lose_mask] - 0.38)
+        lose_mask = (rv_col <= 0.04) & (prob > 0.30)
+        dyn_w[lose_mask] *= 1.0 + 75.0 * (prob[lose_mask] - 0.30)
 
-        win_big_mask = (rv_col >= 0.20) & (prob < 0.86)
-        dyn_w[win_big_mask] *= 1.0 + 22.0 * (0.86 - prob[win_big_mask])
+        win_big_mask = (rv_col >= 0.20) & (prob < 0.88)
+        dyn_w[win_big_mask] *= 1.0 + 25.0 * (0.88 - prob[win_big_mask])
 
-        win_mid_mask = (rv_col > 0.04) & (rv_col < 0.20) & (prob < 0.78)
-        dyn_w[win_mid_mask] *= 1.0 + 15.0 * (0.78 - prob[win_mid_mask])
+        win_mid_mask = (rv_col > 0.04) & (rv_col < 0.20) & (prob < 0.80)
+        dyn_w[win_mid_mask] *= 1.0 + 18.0 * (0.80 - prob[win_mid_mask])
 
         err = (prob - y_t) * dyn_w
 

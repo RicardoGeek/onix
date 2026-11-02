@@ -3,16 +3,17 @@
 //|                                  Copyright 2026, Goldie Service |
 //|                                      https://github.com/goldie  |
 //+------------------------------------------------------------------+
-//| BTCUSD CHRYSALIS v2.00 — 24/7 SATOSHI SUPERNOVA MOONSHOT EDITION |
+//| BTCUSD CHRYSALIS v2.10 — 24/7 SATOSHI SUPERNOVA MOONSHOT EDITION |
 //| Bitcoin 9-Module H1 Unbroken Swing-Breakout + SuperTrend Engine  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Goldie Service"
 #property link      "https://github.com/goldie"
-#property version   "2.00"
-#property description "BTCUSD Chrysalis v2.00 (24/7 Satoshi Supernova Moonshot Edition) - Bitcoin H1 Swing + SuperTrend Overdrive Engine."
+#property version   "2.10"
+#property description "BTCUSD Chrysalis v2.10 (24/7 Satoshi Supernova Moonshot Edition) - Bitcoin H1 Swing + SuperTrend Overdrive Engine."
 #property description "Engineered for 24/7 Crypto Liquidation Cascades, 3-Gear Overdrive Transmission, 37-Lot Book Manager & $300 Moonshot Scaling."
 
 #include <Trade\Trade.mqh>
+#include "../Include/GoldeenTelemetry.mqh"
 
 const int    N_MOD         = 9;
 const int    MIN_HOLD_SEC  = 120;     // the EA's own closes and stop moves wait 2 minutes in prop mode
@@ -96,11 +97,14 @@ input bool   InpSizeFromStart   = true;    // Prop Mode: Size Lots from Starting
 input group "=== General & HUD ==="
 input long   InpMagicNumber     = 777900;  // Magic Number Base (Module N uses Base + N)
 input bool   InpShowHUD         = true;    // Show Satoshi Supernova HUD Panel
+input string InpGoldeenToken    = "";      // Goldeen.io EA Token (gld_ea_... | Empty = Disabled)
+input string InpGoldeenUrl      = "https://api.goldeen.io/api/v1/ea/report"; // Goldeen Telemetry Endpoint
 
 //+------------------------------------------------------------------+
 //| State                                                            |
 //+------------------------------------------------------------------+
 CTrade   g_trade;
+CGoldeenTelemetry g_goldeen;
 ENUM_ORDER_TYPE_FILLING g_filling = ORDER_FILLING_FOK;
 bool     g_run[9];
 int      g_trig[9][2];
@@ -171,7 +175,7 @@ int OnInit()
 
    string mods = "";
    for(int m = 0; m < N_MOD; m++) if(g_run[m]) mods += "S" + IntegerToString(MOD_ID[m]) + " ";
-   PrintFormat("--> [INIT] BTCUSD Chrysalis v2.00 on %s | Modules: %s| SL: %.2f%% | 0.01 Lot Margin: $%.2f | $1000 Move on 0.01 Lot: $%.2f | VolLimit: %.1f",
+   PrintFormat("--> [INIT] BTCUSD Chrysalis v2.10 on %s | Modules: %s| SL: %.2f%% | 0.01 Lot Margin: $%.2f | $1000 Move on 0.01 Lot: $%.2f | VolLimit: %.1f",
                _Symbol, mods, InpStopPct, testMargin, testProfit, SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_LIMIT));
 
    if(!MQLInfoInteger(MQL_TESTER))
@@ -205,6 +209,8 @@ void OnDeinit(const int reason)
          PrintFormat("--> [EXPORT] Wrote %d H1 bars to Common\\Files\\btcusd_h1.csv", got);
       }
    }
+   if(g_goldeen.IsEnabled())
+      EventKillTimer();
    PropSave();
    Comment("");
 }
@@ -1270,7 +1276,7 @@ void UpdateHUD()
 
    string hud = "";
    hud += "====================================================================\n";
-   hud += "  BTCUSD CHRYSALIS v2.00 — 24/7 SATOSHI SUPERNOVA ENGINE\n";
+   hud += "  BTCUSD CHRYSALIS v2.10 — 24/7 SATOSHI SUPERNOVA ENGINE\n";
    hud += "====================================================================\n";
    hud += StringFormat("  [MOONSHOT]   Start: $%.2f  |  Balance: $%.2f  |  Equity: $%.2f\n", start, bal, eq);
    hud += StringFormat("  [GROWTH]     Multiplier: %.2fx (%+.1f%%)  |  Peak HWM: $%.2f (DD: %.2f%%)\n", mult, roi_pct, g_hwm, MathMax(0.0, dd_pct));
@@ -1293,5 +1299,40 @@ void UpdateHUD()
    hud += StringFormat("  [LAST EVENT] %s\n", g_last_event);
    hud += "====================================================================\n";
    Comment(hud);
+}
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Goldeen.io Instant Redis Telemetry Hooks                         |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest &request,
+                        const MqlTradeResult &result)
+{
+   g_goldeen.OnTradeTransactionWatch(trans);
+}
+
+void OnTimer()
+{
+   if(!g_goldeen.IsEnabled())
+      return;
+
+   double bal        = AccountInfoDouble(ACCOUNT_BALANCE);
+   double eq         = AccountInfoDouble(ACCOUNT_EQUITY);
+   double start      = (g_start_bal > 0.0) ? g_start_bal : bal;
+   double totalDDPct = (g_hwm > 0.0) ? MathMax(0.0, (g_hwm - eq) / g_hwm * 100.0) : 0.0;
+   double maxDDLimit = InpPropMode ? InpPropMaxPct : InpParachuteDDPct;
+   double dayDDLimit = InpPropMode ? InpPropDailyPct : 10.0;
+   string modeLabel  = g_parachute_on ? "PARACHUTE ENGAGED" : "9-MOD SUPERNOVA BOOST";
+
+   g_goldeen.OnTimerCheck(start,
+                          0.0,
+                          0.0,
+                          0.0,
+                          dayDDLimit,
+                          totalDDPct,
+                          maxDDLimit,
+                          modeLabel,
+                          g_last_event);
 }
 //+------------------------------------------------------------------+

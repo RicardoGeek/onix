@@ -44,7 +44,7 @@ private:
    //+------------------------------------------------------------------+
    double        EvaluateDeterministicScore(const SStationaryFeatures &f) const
      {
-      double logit = 0.35; // Base prior (~0.587) for Layer-1 confirmed structural sweep
+      double logit = 0.62; // Base prior (~0.650) for Layer-1 confirmed structural sweep in collection/fallback mode
 
       // [0] Sweep depth sweet spot (shallow-to-moderate sweep depth <= 0.48 ATR_M15 has highest win rate)
       if(f.f0_sweep_depth_norm >= 0.12 && f.f0_sweep_depth_norm <= 0.48)

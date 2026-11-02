@@ -5,6 +5,42 @@ Every compiled binary release is archived in `c:\Users\faker\Documents\dev\onix\
 
 ---
 
+## [v2.02] — 2026-11-02 (Goldeen.io Instant Redis Telemetry Integration)
+- **Archived Binary**: [in/BTCUSD_Sniper_ONNX/BTCUSD_Sniper_ONNX_v2.02.ex5](file:///c:/Users/faker/Documents/dev/onix/bin/BTCUSD_Sniper_ONNX/BTCUSD_Sniper_ONNX_v2.02.ex5)
+- **Summary**:
+  - Added [GoldeenTelemetry.mqh](file:///c:/Users/faker/Documents/dev/onix/btcusd-sniper-ea/MQL5/Include/BTCUSD_Quant/Core/GoldeenTelemetry.mqh) (InpGoldeenToken, InpGoldeenUrl = "https://api.goldeen.io/api/v1/ea/report") for timer-driven zero-tick-latency reporting to Goldeen.io's Redis ingestion queue.
+
+---
+## [v2.01] ? 2026-11-02 (Smart Pool-Hierarchy Cooldown & Broker-Timezone-Agnostic H4 ATR)
+- **Archived Binary**: [`bin/BTCUSD_Sniper_ONNX/BTCUSD_Sniper_ONNX_v2.01.ex5`](file:///c:/Users/faker/Documents/dev/onix/bin/BTCUSD_Sniper_ONNX/BTCUSD_Sniper_ONNX_v2.01.ex5)
+- **Summary**:
+  - Updated `IsDirectionInCooldown()` in `SweepSignalEngine.mqh` so the 25-minute post-loss cooldown only blocks repeating internal `M15_SWING` fractals and never blocks primary session boundaries (`ASIAN`, `LONDON`, `PDH/PDL`, `EQUAL_HIGHS/LOWS`), plus added `ComputeBrokerAgnosticAtrH4()` in `SessionLevels.mqh`.
+  - **Verified Performance (`$50,000` Prop Guard, `Model=4` Real Ticks + `ExecutionMode=-1` Random Delay)**:
+    - **`2024`**: **`+$556,788.36`**, `256` setups, **`90.0%` WR** (up from `89.4%`), **`PF 7.51`** (up from `7.22`), `1.42d` avg wait, `4.38%` Max Eq DD.
+    - **`2025?2026`**: **`+$1,772,381.08`** (`+$1,031,878.61` in `2025` at `91.6%` WR, `1.02d` wait + `+$740,502.47` in `2026` at `89.6%` WR, `1.27d` wait), **`PF 8.81`** (up from `8.54`), `4.56%` Max Eq DD (down from `4.69%`).
+    - **Total `2024?2026`**: **`+$2,329,169.44`** (up `+$21,568.44` over `v2.00`), **`840` setups**, **`90.6%` WR**, **`0.82` trades/day**, **`1.22d` avg wait**.
+
+---
+
+## [v2.00] — 2026-11-02 (Wait-Time Compression to `1.24 Days` + Chart HUD AI Telemetry + 128-Unit DAGger ONNX Retrain)
+- **Archived Binary**: [`bin/BTCUSD_Sniper_ONNX/BTCUSD_Sniper_ONNX_v2.00.ex5`](file:///c:/Users/faker/Documents/dev/onix/bin/BTCUSD_Sniper_ONNX/BTCUSD_Sniper_ONNX_v2.00.ex5)
+- **Summary**:
+  - **Expanded Session Pools & Continuous Killzones (`SessionLevels.mqh` & `Definitions.mqh`)**:
+    - Added Early Asia (`00:00–02:30 UTC` active from `02:30 UTC`) and Early London (`06:30–09:00 UTC` active from `09:00 UTC`) liquidity pools alongside Asian (`00:00–06:30 UTC`), London (`06:30–12:30 UTC`), Previous Day (`PDH`/`PDL`), Equal Highs/Lows (`EQH`/`EQL`), and M15 Swing Fractals.
+    - Expanded active killzones to `00:15–05:15 UTC` (Asia/Tokyo) and continuous `06:30–20:30 UTC` (London + London/NY Bridge + Wall Street Spot ETF + US Late Afternoon).
+  - **Calibrated Spread Guard for 2024–2026 Real-Tick Regimes (`EquityGuard.mqh` & `BTCUSD_Sniper_ONNX.mq5`)**:
+    - Raised `IsSpreadDislocated()` baseline floor from `$25.00` to `$42.00`, `InpMaxSpreadMultiplier` to `2.20`, and `InpHardMaxSpreadUSD` to `$95.00` so legitimate 2024 `BTCUSD_REAL` sweep setups are not prematurely blocked by transient M5 sweep spread expansion.
+  - **Chart HUD Live ONNX Query Telemetry (`BTCUSD_Sniper_ONNX.mq5`)**:
+    - Added live `Last AI Call` (`YYYY-MM-DD HH:MM UTC | Dir | Pool`) and `Last AI Decision` (`Tier / REJECT (Score=0.XXXX vs T2=0.56/T1=0.70)`) lines to the on-chart institutional HUD.
+  - **128-Unit Residual MLP ONNX Meta-Labeler (`train_btcusd_onnx.py` & `btcusd_meta_model.onnx`)**:
+    - Trained on `2,183` mapped `POSITION_CLOSED` setups across `2024–2026` (`Model=4` 100% Real Ticks + `ExecutionMode=-1` Random Delay, including DAGger Pass 2 trajectory harvesting).
+  - **Verified Strategy Tester Performance (`$50,000` Prop Guard `MODE_PROP_GUARD`, `Model=4` 100% Real Ticks + `ExecutionMode=-1` Random Delay)**:
+    - **`2024` (`BTCUSD_REAL`)**: **`+$557,347.99`** (vs `+$38,716.03` in `v1.10`), **`254` setups (`483` deals)**, **`89.44%` WR** (vs `85.61%`), **`0.69` trades/day**, **`1.43d` avg wait time** (down from `4.35d`), **`PF 7.22`**, **`4.16%` Max Relative Equity DD** ([`P2_V200_BTCUSD_2024.htm`](file:///C:/Users/faker/Documents/onix_artifacts/reports/P2_V200_BTCUSD_2024.htm)).
+    - **`2025–2026` (`BTCUSD` Live01)**: **`+$1,750,253.01`** (`$1,061,604.98` in `2025` + `$688,648.03` in `2026`, vs `+$847,389.93` in `v1.10`), **`578` setups (`1,118` deals)**, **`91.06%` WR** (`91.7%` in `2025`, `90.0%` in `2026`), **`1.04d` avg wait time in `2025` / `1.27d` in `2026`**, **`PF 8.54`**, **`4.69%` Max Relative Equity DD** ([`P2_V200_BTCUSD_2526.htm`](file:///C:/Users/faker/Documents/onix_artifacts/reports/P2_V200_BTCUSD_2526.htm)).
+    - **Total `2024–2026`**: **`+$2,307,601.00`** (up **2.60x** from `+$886,105.96`), **`832` setups**, **`90.6%` WR**, **`0.81` trades/day**, **`1.24d` avg wait time** (down from `2.19d`).
+
+---
+
 ## [v1.10] — 2026-10-28 (100% Real-Tick + Random-Delay ONNX Retrain)
 - **Archived Binary**: `bin/BTCUSD_Sniper_ONNX/BTCUSD_Sniper_ONNX_v1.10.ex5`
 - **Summary**:

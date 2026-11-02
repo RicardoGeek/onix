@@ -638,8 +638,8 @@ public:
       if(m_currentSpreadUSD > m_hardMaxSpreadUSD)
          return true;
 
-      // Baseline floor of $25.00 on BTCUSD
-      double baselineAvg = MathMax(m_rollingAvgSpreadUSD, 25.0);
+      // Baseline floor of $42.00 on BTCUSD to accommodate 2024-2026 ECN/CFD spread regimes
+      double baselineAvg = MathMax(m_rollingAvgSpreadUSD, 42.0);
       if(m_spreadSampleCount >= 10 && m_currentSpreadUSD > (m_maxSpreadMultiplier * baselineAvg))
          return true;
 

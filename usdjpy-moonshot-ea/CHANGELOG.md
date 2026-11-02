@@ -5,6 +5,12 @@ Archived version-stamped binaries are stored in [`/bin/`](../bin/).
 
 ---
 
+## [v3.20] — 2026-11-02 (Goldeen.io Instant Redis Telemetry Integration)
+- **Archived Binary**: in/usdjpy_chrysalis_ea/usdjpy_chrysalis_ea_v3.20.ex5
+- **Summary**:
+  - Added GoldeenTelemetry.mqh (InpGoldeenToken, InpGoldeenUrl = "https://api.goldeen.io/api/v1/ea/report") tracking all 9 Ninja Marsshot modules (InpMagicNumber .. InpMagicNumber + 20) via non-blocking timer heartbeats and closed deal reconciliation.
+
+---
 ## [v3.10] — 2026-10-26 (Baseline Archive)
 - **Archived Binary**: `bin/usdjpy_chrysalis_ea/usdjpy_chrysalis_ea_v3.10.ex5`
 - **Summary**:

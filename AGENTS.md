@@ -69,10 +69,11 @@ This document contains the complete system context, Windows VM paths, architectu
    - Input 0: `"input_features"` -> `float32[1, 12]`
    - Output 0: `"label"` -> `int64[1]`
    - Output 1: `"probabilities"` -> `float32[1, 2]`
-6. **Binary Version Archiving (`bin/<EA_Folder>/`) & Per-EA `CHANGELOG.md` Rule**:
+6. **Binary Version Archiving (`bin/<EA_Folder>/`), Terminal Deployment & Per-EA `CHANGELOG.md` Rule**:
    - Whenever any EA is modified and compiled to a new version (`#property version "X.YY"`):
      1. Archive the compiled `.ex5` binary in `c:\Users\faker\Documents\dev\onix\bin\<EA_Folder>\<EA_Name>_v<X.YY>.ex5` so any historical version can be restored at any time.
-     2. Add a new version section (`## [vX.YY] — YYYY-MM-DD`) at the top of that EA's root `CHANGELOG.md` explaining the architectural and parameter changes.
+     2. Deploy `<EA_Name>_v<X.YY>.ex5` (and sync `<EA_Name>.ex5`) to `MQL5\Experts\` across **every** MT5 terminal (`Pepperstone`, `Upcomers`, `GetLeveraged`, `BreakFree`, `MT5 Tests`) and **remove any older versioned `<EA_Name>_v*.ex5` files** from every terminal's `MQL5\Experts\` folder so only the latest versioned binary is present.
+     3. Add a new version section (`## [vX.YY] ? YYYY-MM-DD`) at the top of that EA's root `CHANGELOG.md` explaining the architectural and parameter changes.
 
 ---
 
@@ -236,3 +237,15 @@ Get-Content "C:\Users\faker\Documents\onix_artifacts\logs\compile.log" | Select-
 # 3. Copy compiled .ex5 back to repo and all MT5 terminals
 Copy-Item "$mt5Mql5\Experts\XAUUSD_Sniper_ONNX.ex5" "$repo\MQL5\Experts\XAUUSD_Sniper_ONNX.ex5" -Force
 ```
+
+---
+
+## 5. Queued Roadmap & Upcoming Session Items
+
+1. **Chart HUD — Last ONNX Query Telemetry (Next Sniper Version)**:
+   - Add persistent HUD fields in `UpdateChartHUD()` across the Sniper EAs (`XAUUSD_Sniper_ONNX`, `USDJPY_Sniper_ONNX`, `BTCUSD_Sniper_ONNX`):
+     - `Last Model Call`: Timestamp (`YYYY-MM-DD HH:MM UTC`) + Setup Direction & Swept Liquidity Pool (`e.g., LONG @ ASIAN_LOW`).
+     - `Last Model Decision`: `P(Win)` score vs. active threshold & resulting action (`e.g., P=0.742 vs 0.58 -> APPROVED [TIER 1]` or `P=0.412 vs 0.58 -> FILTERED`).
+2. **Weekend Sanity Check for November Live Deployment**:
+   - Run full `Model=4` Torture Report + sanity audit on `usdjpy_chrysalis_ea` and `USDJPY_Sniper_ONNX` ahead of November live deployment.
+

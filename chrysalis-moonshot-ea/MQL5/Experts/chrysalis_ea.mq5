@@ -3,16 +3,17 @@
 //|                                  Copyright 2026, Goldie Service |
 //|                                      https://github.com/goldie  |
 //+------------------------------------------------------------------+
-//| CHRYSALIS v3.00 — 9-MODULE SUPERNOVA MOONSHOT EDITION (XAUUSD)   |
+//| CHRYSALIS v3.10 — 9-MODULE SUPERNOVA MOONSHOT EDITION (XAUUSD)   |
 //| XAUUSD 9-Module H1 Unbroken Swing-Breakout Portfolio             |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Goldie Service"
 #property link      "https://github.com/goldie"
-#property version   "3.00"
-#property description "Chrysalis v3.00 (9-Module Supernova Moonshot Edition) - XAUUSD H1 Unbroken Swing-Breakout Engine."
+#property version   "3.10"
+#property description "Chrysalis v3.10 (9-Module Supernova Moonshot Edition) - XAUUSD H1 Unbroken Swing-Breakout Engine."
 #property description "Features S1-S4 Drought Breakers, H11/H22 Exhaustion Shield, Opposite-Side Re-Arm & Stage-2 Ratchet."
 
 #include <Trade\Trade.mqh>
+#include "../Include/GoldeenTelemetry.mqh"
 
 const int    N_MOD         = 9;
 const int    MIN_HOLD_SEC  = 120;     // the EA's own closes and stop moves wait 2 minutes in prop mode
@@ -86,11 +87,14 @@ input bool   InpSizeFromStart   = true;    // Prop Mode: Size Lots from Starting
 input group "=== General & HUD ==="
 input long   InpMagicNumber     = 777500;  // Magic Number Base (Module N uses Base + N)
 input bool   InpShowHUD         = true;    // Show Supernova Moonshot HUD Panel
+input string InpGoldeenToken    = "";      // Goldeen.io EA Token (gld_ea_... | Empty = Disabled)
+input string InpGoldeenUrl      = "https://api.goldeen.io/api/v1/ea/report"; // Goldeen Telemetry Endpoint
 
 //+------------------------------------------------------------------+
 //| State                                                            |
 //+------------------------------------------------------------------+
 CTrade   g_trade;
+CGoldeenTelemetry g_goldeen;
 ENUM_ORDER_TYPE_FILLING g_filling = ORDER_FILLING_FOK;
 bool     g_run[9];
 int      g_trig[9][2];            // placement trigger per module and side (0 buy, 1 sell): 0 none, 1 event, 2 new level
@@ -171,7 +175,7 @@ int OnInit()
    PropInit();
    string mods = "";
    for(int m = 0; m < N_MOD; m++) if(g_run[m]) mods += "S" + IntegerToString(MOD_ID[m]) + " ";
-   PrintFormat("--> [INIT] Chrysalis v3.00 Supernova on %s | Modules: %s| Sizing: %s | MaxPos: %d | SL: $%.2f",
+   PrintFormat("--> [INIT] Chrysalis v3.10 Supernova on %s | Modules: %s| Sizing: %s | MaxPos: %d | SL: $%.2f",
                _Symbol, mods,
                (InpFixLot > 0.0) ? StringFormat("Fixed %.2f lot", InpFixLot)
                                  : StringFormat("%.2f lot / $%.0f step", InpLotStep, InpBalanceStep),
@@ -184,11 +188,23 @@ int OnInit()
                g_prev_lvl[m][s] = FindLevel(m, s == 0);
       if(InpShowHUD) UpdateHUD();
    }
+   g_goldeen.Init(InpGoldeenToken,
+                  InpGoldeenUrl,
+                  "chrysalis_ea",
+                  "3.10",
+                  "Chrysalis Moonshot",
+                  _Symbol,
+                  (ulong)InpMagicNumber,
+                  (ulong)(InpMagicNumber + 20));
+   if(g_goldeen.IsEnabled())
+      EventSetTimer(2);
    return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
+   if(g_goldeen.IsEnabled())
+      EventKillTimer();
    PropSave();
    Comment("");
 }
@@ -697,7 +713,9 @@ void PropGuard()
    long login = AccountInfoInteger(ACCOUNT_LOGIN);
    if(login > 0 && login != g_login)
    {
-      PropSave();
+      if(g_goldeen.IsEnabled())
+      EventKillTimer();
+   PropSave();
       PrintFormat("--> [PROP] account changed: %I64d -> %I64d", g_login, login);
       PropInit();
    }
@@ -1118,7 +1136,7 @@ void UpdateHUD()
 
    string hud = "";
    hud += "====================================================================\n";
-   hud += "  CHRYSALIS v3.00 — 9-MODULE SUPERNOVA MOONSHOT ENGINE (XAUUSD)\n";
+   hud += "  CHRYSALIS v3.10 — 9-MODULE SUPERNOVA MOONSHOT ENGINE (XAUUSD)\n";
    hud += "====================================================================\n";
    hud += StringFormat("  [MOONSHOT]   Start: $%.2f  |  Balance: $%.2f  |  Equity: $%.2f\n", start, bal, eq);
    hud += StringFormat("  [GROWTH]     Multiplier: %.2fx (%+.1f%%)  |  Peak HWM: $%.2f (DD: %.2f%%)\n", mult, roi_pct, g_hwm, MathMax(0.0, dd_pct));
@@ -1146,5 +1164,40 @@ void UpdateHUD()
    hud += StringFormat("  [LAST EVENT] %s\n", g_last_event);
    hud += "====================================================================\n";
    Comment(hud);
+}
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Goldeen.io Instant Redis Telemetry Hooks                         |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest &request,
+                        const MqlTradeResult &result)
+{
+   g_goldeen.OnTradeTransactionWatch(trans);
+}
+
+void OnTimer()
+{
+   if(!g_goldeen.IsEnabled())
+      return;
+
+   double bal        = AccountInfoDouble(ACCOUNT_BALANCE);
+   double eq         = AccountInfoDouble(ACCOUNT_EQUITY);
+   double start      = (g_start_bal > 0.0) ? g_start_bal : bal;
+   double totalDDPct = (g_hwm > 0.0) ? MathMax(0.0, (g_hwm - eq) / g_hwm * 100.0) : 0.0;
+   double maxDDLimit = InpPropMode ? InpPropMaxPct : InpParachuteDDPct;
+   double dayDDLimit = InpPropMode ? InpPropDailyPct : 10.0;
+   string modeLabel  = g_parachute_on ? "PARACHUTE ENGAGED" : "9-MOD SUPERNOVA BOOST";
+
+   g_goldeen.OnTimerCheck(start,
+                          0.0,
+                          0.0,
+                          0.0,
+                          dayDDLimit,
+                          totalDDPct,
+                          maxDDLimit,
+                          modeLabel,
+                          g_last_event);
 }
 //+------------------------------------------------------------------+

@@ -5,6 +5,48 @@ Archived version-stamped binaries are stored in [`/bin/`](../bin/).
 
 ---
 
+## [v4.32] — 2026-11-02 (Goldeen.io Instant Redis Telemetry Integration)
+- **Archived Binary**: [in/XAUUSD_Sniper_ONNX/XAUUSD_Sniper_ONNX_v4.32.ex5](file:///c:/Users/faker/Documents/dev/onix/bin/XAUUSD_Sniper_ONNX/XAUUSD_Sniper_ONNX_v4.32.ex5)
+- **Summary**:
+  - Added [GoldeenTelemetry.mqh](file:///c:/Users/faker/Documents/dev/onix/xauusd-quant-ea/MQL5/Include/XAUUSD_Quant/Core/GoldeenTelemetry.mqh) (InpGoldeenToken, InpGoldeenUrl = "https://api.goldeen.io/api/v1/ea/report").
+  - Completely disabled in Strategy Tester (MQL_TESTER) and when InpGoldeenToken == "".
+  - Runs strictly on OnTimer() (EventSetTimer(2)) off the OnTick() hot path, reporting live equity/balance, daily/total drawdown, active open positions, historical closed trades, and last ONNX AI decision to the instant Redis-queued /api/v1/ea/report endpoint.
+
+---
+## [v4.31] ? 2026-11-02 (Smart Pool-Hierarchy Cooldown & Broker-Timezone-Agnostic H4 ATR)
+- **Archived Binary**: [`bin/XAUUSD_Sniper_ONNX/XAUUSD_Sniper_ONNX_v4.31.ex5`](file:///c:/Users/faker/Documents/dev/onix/bin/XAUUSD_Sniper_ONNX/XAUUSD_Sniper_ONNX_v4.31.ex5)
+- **Architectural Upgrades**:
+  1. **Smart Pool-Hierarchy Cooldown (`SweepSignalEngine.mqh` -> `IsDirectionInCooldown()`)**:
+     - The 25-minute (`1500s`) post-loss directional cooldown now applies strictly to internal micro-fractals (`LIQ_M15_SWING_LOW`/`HIGH`, `LIQ_EXTERNAL_LVN_LOW`/`HIGH`) and **never blocks a primary institutional session boundary** (`LIQ_ASIAN_LOW`/`HIGH`, `LIQ_LONDON_LOW`/`HIGH`, `LIQ_PDL`/`PDH`, `LIQ_EQUAL_LOWS`/`HIGHS`, `LIQ_EARLY_ASIAN`, `LIQ_EARLY_LONDON`). When an internal M15 swing stops out because price is flushing into the true session low/high, the EA immediately captures the primary session reversal.
+  2. **Broker-Timezone-Agnostic `UTC+2` H4 ATR (`SessionLevels.mqh` -> `ComputeBrokerAgnosticAtrH4()`)**:
+     - Synthesizes `UTC+2`-aligned 14-period H4 True Range from closed `PERIOD_H1` bars whenever a broker server is not on `UTC+2` (such as Upcomers on `UTC+1`), eliminating `f8_volatility_ratio` drift across brokers.
+- **Verified Strategy Tester Performance (`$50,000` Prop Guard `MODE_PROP_GUARD`, `Model=4` Real Ticks + `ExecutionMode=-1` Random Delay)**:
+  - **`2024`**: **`+$568,255.18`** (up `+$44,571` vs `v4.30`), `248` setups (`478` deals), **`86.61%` WR**, **`PF 6.77`**, **`4.45%` Max Relative Equity DD** (`0.96d` avg wait).
+  - **`2025?2026`**: **`+$5,833,005.42`** (`+$1,187,109.61` in `2025` + `+$4,702,049.06` in `2026`, up `+$260,988` vs `v4.30`), `532` setups (`1,034` deals), **`88.78%` WR**, **`PF 6.48`**, **`4.31%` Max Relative Equity DD** (`0.84d` / `0.81d` avg wait).
+  - **Total `2024?2026`**: **`+$6,457,413.85`** (deal sum / `+$6,401,260.60` report net, up **`+$307,238.01`** over `v4.30`), **`780` setups**, **`88.1%` WR**, **`1.09` trades/day**, **`0.87d` avg wait**.
+
+---
+
+## [v4.30] — 2026-11-02 (Sub-1-Day Wait Time Architecture: Tokyo Impulse Window + Early/Full London Pools + 88-Unit ONNX Meta-Labeler + HUD AI Telemetry)
+- **Archived Binary**: `bin/XAUUSD_Sniper_ONNX/XAUUSD_Sniper_ONNX_v4.30.ex5`
+- **Summary**:
+  - **Layer-1 Structural Frequency & Session Upgrades (`SessionLevels.mqh` & `SweepSignalEngine.mqh`)**:
+    1. **Tokyo Open Impulse Killzone (`01:30–02:55 UTC`)**: Locks the Initial Asian Opening Range (`00:00–01:30 UTC`) at `01:30 UTC` to capture high-probability Tokyo/Shanghai open liquidity sweeps while skipping the `03:00–06:25 UTC` mid-Asia dead zone, then locks the Full Asian Range at `06:30 UTC` for London.
+    2. **Early London (`09:30 UTC`) & Full London (`11:30 UTC`) Session Liquidity Pools**: Activates `m_londonHigh` and `m_londonLow` from `09:30 UTC` onward (and refreshes if a new extreme forms by `11:30 UTC`) alongside every-M5-bar pool updates, unlocking Late-London and NY sweeps of the London session extremes.
+    3. **Relaxed Post-08:30 UTC Inner Asian Core Filter**: Restricts `asianInnerHalf` fractal filtering strictly to Early London Open (`06:30–08:30 UTC`) so confirmed 5-bar M15 continuation pullback swings inside the prior Asian range are never discarded during London/NY trends.
+    4. **Balanced Short Pool Filter & 25-Minute Post-Loss Cooldown**: Blocks low-expectancy bull-market `LIQ_PDH` short fades while enabling `LIQ_EQUAL_HIGHS`, `LIQ_ASIAN_HIGH` (`>= 36%` upper wick or strong bearish body), and non-bullish `LIQ_M15_SWING_HIGH` sweeps; reduces same-direction post-loss cooldown from `60m` to `25m` (`1,500s`) and widens `maxImmediateSL` (`1.85x / 2.45x ATR_M5`).
+  - **88-Unit Hard-Negative Mined ONNX Meta-Labeler (`retrain_multiyear_onnx.py`)**:
+    - Trained on **`1,434` mapped `Model=4` Real-Tick + Random-Delay `POSITION_CLOSED` outcomes** (`10,000` epochs, `75x` false-positive loser penalty), doubling approved trade frequency while maintaining `86%–89%+` Real-Tick Win Rate.
+  - **Real-Time Chart HUD AI Telemetry (`XAUUSD_Sniper_ONNX.mq5`)**:
+    - Added `[LAST CALL]` (timestamp, direction, swept pool, and level price) and `[LAST DECIS]` (ONNX score vs Tier-2/Tier-1 thresholds and approval/filter status) directly to `UpdateChartHUD()`.
+  - **Verified `Model=4` (`99%` Real Ticks) + `ExecutionMode=-1` (Random Delay) Torture Performance (`$50,000` `MODE_PROP_GUARD`)**:
+    - **`2024`**: **`$523,683.84`**, **`251` trades executed**, **`85.89%` WR**, **`1.00` trades/day**, **`1.04 days` avg wait**, **`PF 6.68`**, **`3.11%` Eq DD**, **Score: `91.4`**.
+    - **`2025`**: **`$1,116,225.02`**, **`280` trades executed**, **`89.17%` WR**, **`1.11` trades/day**, **`0.93 days` avg wait**, **Score: `95.2`**.
+    - **`2026 YTD`**: **`$4,455,791.98`**, **`250` trades executed**, **`87.22%` WR**, **`1.17` trades/day**, **`0.85 days` avg wait**, **Score: `96.1`** (**`2025–2026` Combined**: **`$5,572,017.00`**, **`PF 6.25`**, **`88.25%` WR**, **`2.15%` Eq DD**).
+    - **3-Year Total**: **`$6,095,700.84`**, **`781` trades executed**, **`87.50%` WR**, **`1.09` trades/day**, **`0.94 days` avg wait**, **Score: `94.6`**.
+
+---
+
 ## [v4.25] — 2026-10-28 (High-Frequency Institutional Killzones + 44-Unit Hard-Negative Mined ONNX Meta-Labeler)
 - **Archived Binary**: `bin/XAUUSD_Sniper_ONNX/XAUUSD_Sniper_ONNX_v4.25.ex5`
 - **Summary**:

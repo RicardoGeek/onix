@@ -53,6 +53,52 @@ private:
       return 0.0;
      }
 
+   double            ComputeBrokerAgnosticAtrH4() const
+     {
+      int offsetSec = ResolveEffectiveGMTOffsetSeconds(m_brokerGMTOffset);
+      if(offsetSec == 7200)
+         return ReadIndicatorScalar(m_handleAtrH4, 0, 1);
+
+      MqlRates h1[];
+      ArraySetAsSeries(h1, true);
+      int copied = CopyRates(m_symbol, PERIOD_H1, 1, 72, h1);
+      if(copied < 64)
+         return ReadIndicatorScalar(m_handleAtrH4, 0, 1);
+
+      int startIdx = -1;
+      for(int i = 0; i < 4 && i < copied; i++)
+        {
+         datetime barUtc = h1[i].time - offsetSec;
+         datetime barUtcPlus2 = barUtc + 7200;
+         MqlDateTime dt;
+         TimeToStruct(barUtcPlus2, dt);
+         if((dt.hour % 4) == 3)
+           {
+            startIdx = i;
+            break;
+           }
+        }
+      if(startIdx < 0 || (startIdx + 15 * 4) > copied)
+         return ReadIndicatorScalar(m_handleAtrH4, 0, 1);
+
+      double sumTR = 0.0;
+      for(int b = 0; b < 14; b++)
+        {
+         int baseIdx = startIdx + b * 4;
+         double bHigh = h1[baseIdx].high;
+         double bLow  = h1[baseIdx].low;
+         for(int k = 1; k < 4; k++)
+           {
+            if(h1[baseIdx + k].high > bHigh) bHigh = h1[baseIdx + k].high;
+            if(h1[baseIdx + k].low  < bLow)  bLow  = h1[baseIdx + k].low;
+           }
+         double prevClose = h1[baseIdx + 4].close;
+         double tr = MathMax(bHigh - bLow, MathMax(MathAbs(bHigh - prevClose), MathAbs(bLow - prevClose)));
+         sumTR += tr;
+        }
+      return sumTR / 14.0;
+     }
+
    double            ComputeADR20() const
      {
       MqlRates d1Rates[];
@@ -87,11 +133,21 @@ private:
    double            m_preTokyoHigh;
    double            m_preTokyoLow;
    bool              m_preTokyoComplete;
+   double            m_earlyTokyoHigh;
+   double            m_earlyTokyoLow;
+   bool              m_earlyTokyoComplete;
+   double            m_earlyLondonHigh;
+   double            m_earlyLondonLow;
+   bool              m_earlyLondonComplete;
    double            m_londonHigh;
    double            m_londonLow;
    bool              m_londonComplete;
    bool              m_asianHighSweptToday;
    bool              m_asianLowSweptToday;
+   bool              m_earlyTokyoHighSweptToday;
+   bool              m_earlyTokyoLowSweptToday;
+   bool              m_earlyLondonHighSweptToday;
+   bool              m_earlyLondonLowSweptToday;
    bool              m_londonHighSweptToday;
    bool              m_londonLowSweptToday;
    bool              m_pdhSweptToday;
@@ -103,13 +159,13 @@ private:
      {
       for(int i = 0; i < m_sweptCountToday; i++)
         {
-         if(MathAbs(m_sweptPricesToday[i] - price) < 0.035)
+         if(MathAbs(m_sweptPricesToday[i] - price) < 0.030)
             return true;
         }
       return false;
      }
 
-   //--- Compute Pre-Tokyo Range (21:00 prior day - 00:30 UTC), Asian Range (00:00 - 06:30 UTC), London H/L (06:30 - 11:30 UTC), and PDH/PDL
+   //--- Compute Pre-Tokyo Range (21:00 prior day - 00:30 UTC), Early Tokyo (00:00 - 02:00 UTC), Asian Range (00:00 - 06:30 UTC), Early/Full London H/L, and PDH/PDL
    void              UpdateDailyAndAsianBoundaries(const datetime utcNow)
      {
       MqlDateTime dtUTC;
@@ -117,32 +173,45 @@ private:
       dtUTC.hour = 0;
       dtUTC.min  = 0;
       dtUTC.sec  = 0;
-      datetime todayStartUTC = StructToTime(dtUTC);
-      datetime tokyoOpenUTC  = todayStartUTC + 30 * 60;             // 00:30 UTC
-      datetime asianEndUTC   = todayStartUTC + 6 * 3600 + 30 * 60;  // 06:30 UTC
+      datetime todayStartUTC   = StructToTime(dtUTC);
+      datetime tokyoOpenUTC    = todayStartUTC + 30 * 60;             // 00:30 UTC
+      datetime earlyTokyoEnd   = todayStartUTC + 2 * 3600;            // 02:00 UTC
+      datetime asianEndUTC     = todayStartUTC + 6 * 3600 + 30 * 60;  // 06:30 UTC
+      datetime earlyLondonEnd  = todayStartUTC + 9 * 3600 + 30 * 60;  // 09:30 UTC
+      datetime londonEndUTC    = todayStartUTC + 11 * 3600 + 30 * 60; // 11:30 UTC
 
       if(todayStartUTC != m_currentDayStartUTC)
         {
-         m_sweptCountToday      = 0;
-         m_preTokyoHigh         = 0.0;
-         m_preTokyoLow          = 0.0;
-         m_preTokyoComplete     = false;
-         m_londonHigh           = 0.0;
-         m_londonLow            = 0.0;
-         m_londonComplete       = false;
-         m_asianHighSweptToday  = false;
-         m_asianLowSweptToday   = false;
-         m_londonHighSweptToday = false;
-         m_londonLowSweptToday  = false;
-         m_pdhSweptToday        = false;
-         m_pdlSweptToday        = false;
+         m_sweptCountToday           = 0;
+         m_preTokyoHigh              = 0.0;
+         m_preTokyoLow               = 0.0;
+         m_preTokyoComplete          = false;
+         m_earlyTokyoHigh            = 0.0;
+         m_earlyTokyoLow             = 0.0;
+         m_earlyTokyoComplete        = false;
+         m_earlyLondonHigh           = 0.0;
+         m_earlyLondonLow            = 0.0;
+         m_earlyLondonComplete       = false;
+         m_londonHigh                = 0.0;
+         m_londonLow                 = 0.0;
+         m_londonComplete            = false;
+         m_asianHighSweptToday       = false;
+         m_asianLowSweptToday        = false;
+         m_earlyTokyoHighSweptToday  = false;
+         m_earlyTokyoLowSweptToday   = false;
+         m_earlyLondonHighSweptToday = false;
+         m_earlyLondonLowSweptToday  = false;
+         m_londonHighSweptToday      = false;
+         m_londonLowSweptToday       = false;
+         m_pdhSweptToday             = false;
+         m_pdlSweptToday             = false;
         }
 
       m_currentDayStartUTC = todayStartUTC;
       m_ref.sessionDateUTC = todayStartUTC;
       m_ref.asianComplete  = (utcNow >= asianEndUTC);
 
-      // 1. Pre-Tokyo Range (21:00 UTC yesterday to 00:30 UTC today) for Tokyo Open Killzone (00:30 - 03:30 UTC)
+      // 1a. Pre-Tokyo Range (21:00 UTC yesterday to 00:30 UTC today) for Tokyo Open Killzone (00:30 - 03:55 UTC)
       m_preTokyoComplete = (utcNow >= tokyoOpenUTC);
       if(m_preTokyoComplete && m_preTokyoHigh <= 0.0)
         {
@@ -162,6 +231,30 @@ private:
               {
                m_preTokyoHigh = ptH;
                m_preTokyoLow  = ptL;
+              }
+           }
+        }
+
+      // 1b. Early Tokyo Opening Range (00:00 - 02:00 UTC) for Tokyo Post-Fix / JGB Auction (02:00 - 03:55 UTC)
+      m_earlyTokyoComplete = (utcNow >= earlyTokyoEnd);
+      if(m_earlyTokyoComplete && m_earlyTokyoHigh <= 0.0)
+        {
+         datetime serverTodayStart = UTCTimeToServer(todayStartUTC, m_brokerGMTOffset);
+         datetime serverETEnd      = UTCTimeToServer(earlyTokyoEnd, m_brokerGMTOffset);
+         MqlRates etRates[];
+         int copiedET = CopyRates(m_symbol, PERIOD_M5, serverTodayStart, serverETEnd, etRates);
+         if(copiedET > 0)
+           {
+            double etH = -DBL_MAX, etL = DBL_MAX;
+            for(int i = 0; i < copiedET; i++)
+              {
+               if(etRates[i].high > etH) etH = etRates[i].high;
+               if(etRates[i].low  < etL) etL = etRates[i].low;
+              }
+            if(etH > etL && etL > 0.0)
+              {
+               m_earlyTokyoHigh = etH;
+               m_earlyTokyoLow  = etL;
               }
            }
         }
@@ -189,8 +282,31 @@ private:
            }
         }
 
-      // 3. Completed London Session High/Low (06:30 - 11:30 UTC) once NY Killzone begins
-      datetime londonEndUTC = todayStartUTC + 11 * 3600 + 30 * 60;
+      // 3a. Early London Opening Range (06:30 - 09:30 UTC) once Mid-London begins
+      m_earlyLondonComplete = (utcNow >= earlyLondonEnd);
+      if(m_earlyLondonComplete && m_earlyLondonHigh <= 0.0)
+        {
+         datetime serverLondonStart    = UTCTimeToServer(asianEndUTC, m_brokerGMTOffset);
+         datetime serverEarlyLondonEnd = UTCTimeToServer(earlyLondonEnd, m_brokerGMTOffset);
+         MqlRates elRates[];
+         int copiedEL = CopyRates(m_symbol, PERIOD_M5, serverLondonStart, serverEarlyLondonEnd, elRates);
+         if(copiedEL > 0)
+           {
+            double elH = -DBL_MAX, elL = DBL_MAX;
+            for(int i = 0; i < copiedEL; i++)
+              {
+               if(elRates[i].high > elH) elH = elRates[i].high;
+               if(elRates[i].low  < elL) elL = elRates[i].low;
+              }
+            if(elH > elL && elL > 0.0)
+              {
+               m_earlyLondonHigh = elH;
+               m_earlyLondonLow  = elL;
+              }
+           }
+        }
+
+      // 3b. Completed Full London Session High/Low (06:30 - 11:30 UTC) once NY Killzone begins
       m_londonComplete      = (utcNow >= londonEndUTC);
       if(m_londonComplete)
         {
@@ -250,25 +366,41 @@ private:
      {
       m_poolCount = 0;
 
-      // 1a. During Tokyo Open Killzone (00:30 - 03:30 UTC), add Pre-Tokyo High/Low as Asian Session Pool
+      // 1a. During Tokyo Open Killzone (00:30 - 03:55 UTC), add Pre-Tokyo High/Low and Early Tokyo Opening Range (after 02:00 UTC)
       if(!m_ref.asianComplete && m_preTokyoComplete && m_preTokyoHigh > 0.0 && m_preTokyoLow > 0.0)
         {
          AddLiquidityPool(m_preTokyoHigh, m_currentDayStartUTC, LIQ_ASIAN_HIGH, 2, false, m_asianHighSweptToday);
          AddLiquidityPool(m_preTokyoLow,  m_currentDayStartUTC, LIQ_ASIAN_LOW,  2, false, m_asianLowSweptToday);
         }
 
-      // 1b. Primary Session Levels (Completed Asian High/Low after 06:30 UTC, London High/Low after 11:30 UTC, PDH, PDL)
+      if(!m_ref.asianComplete && m_earlyTokyoComplete && m_earlyTokyoHigh > 0.0 && m_earlyTokyoLow > 0.0)
+        {
+         if(MathAbs(m_earlyTokyoHigh - m_preTokyoHigh) > 0.030)
+            AddLiquidityPool(m_earlyTokyoHigh, m_currentDayStartUTC + 2 * 3600, LIQ_ASIAN_HIGH, 2, false, m_earlyTokyoHighSweptToday);
+         if(MathAbs(m_earlyTokyoLow - m_preTokyoLow) > 0.030)
+            AddLiquidityPool(m_earlyTokyoLow,  m_currentDayStartUTC + 2 * 3600, LIQ_ASIAN_LOW,  2, false, m_earlyTokyoLowSweptToday);
+        }
+
+      // 1b. Primary Session Levels (Completed Asian High/Low after 06:30 UTC, Early/Full London High/Low, PDH, PDL)
       if(m_ref.asianComplete && m_ref.asianHigh > 0.0 && m_ref.asianLow > 0.0)
         {
          AddLiquidityPool(m_ref.asianHigh, m_currentDayStartUTC, LIQ_ASIAN_HIGH, 2, false, m_asianHighSweptToday);
          AddLiquidityPool(m_ref.asianLow,  m_currentDayStartUTC, LIQ_ASIAN_LOW,  2, false, m_asianLowSweptToday);
         }
 
+      if(m_earlyLondonComplete && m_earlyLondonHigh > 0.0 && m_earlyLondonLow > 0.0)
+        {
+         if(MathAbs(m_earlyLondonHigh - m_ref.asianHigh) > 0.035)
+            AddLiquidityPool(m_earlyLondonHigh, m_currentDayStartUTC + 6 * 3600 + 30 * 60, LIQ_ASIAN_HIGH, 2, false, m_earlyLondonHighSweptToday);
+         if(MathAbs(m_earlyLondonLow - m_ref.asianLow) > 0.035)
+            AddLiquidityPool(m_earlyLondonLow,  m_currentDayStartUTC + 6 * 3600 + 30 * 60, LIQ_ASIAN_LOW,  2, false, m_earlyLondonLowSweptToday);
+        }
+
       if(m_londonComplete && m_londonHigh > 0.0 && m_londonLow > 0.0)
         {
-         if(MathAbs(m_londonHigh - m_ref.asianHigh) > 0.050)
+         if(MathAbs(m_londonHigh - m_ref.asianHigh) > 0.035 && MathAbs(m_londonHigh - m_earlyLondonHigh) > 0.035)
             AddLiquidityPool(m_londonHigh, m_currentDayStartUTC + 7 * 3600, LIQ_ASIAN_HIGH, 2, false, m_londonHighSweptToday);
-         if(MathAbs(m_londonLow - m_ref.asianLow) > 0.050)
+         if(MathAbs(m_londonLow - m_ref.asianLow) > 0.035 && MathAbs(m_londonLow - m_earlyLondonLow) > 0.035)
             AddLiquidityPool(m_londonLow,  m_currentDayStartUTC + 7 * 3600, LIQ_ASIAN_LOW,  2, false, m_londonLowSweptToday);
         }
 
@@ -287,9 +419,15 @@ private:
 
       double equalToleranceUSD = m_equalLevelAtrRatio * MathMax(m_ref.atrM15Current, 0.080);
 
-      double asianMid       = (m_ref.asianComplete && m_ref.asianHigh > 0.0 && m_ref.asianLow > 0.0)
+      datetime utcNow = ResolveCurrentUTCTime(m_brokerGMTOffset);
+      MqlDateTime dtNow;
+      TimeToStruct(utcNow, dtNow);
+      int minOfDay = dtNow.hour * 60 + dtNow.min;
+      bool inEarlyLondonOpen = (minOfDay >= (6 * 60 + 30) && minOfDay <= (8 * 60 + 30));
+
+      double asianMid       = (inEarlyLondonOpen && m_ref.asianComplete && m_ref.asianHigh > 0.0 && m_ref.asianLow > 0.0)
                               ? (0.50 * (m_ref.asianHigh + m_ref.asianLow)) : 0.0;
-      double asianInnerHalf = 0.25 * m_ref.asianRange;
+      double asianInnerHalf = 0.20 * m_ref.asianRange;
 
       for(int i = 2; i < copied - 2; i++)
         {
@@ -479,21 +617,20 @@ public:
       if(minOfDay >= (20 * 60 + 55) && minOfDay <= (22 * 60 + 10))
          return SESSION_ROLLOVER_BLACKOUT;
 
-      // Tokyo Post-Fix & JGB Auction Reversal Killzone: 03:00 - 03:55 UTC (cut off 04:00-04:15 dead zone)
-      if(minOfDay >= (3 * 60) && minOfDay <= (3 * 60 + 55))
+      // Tokyo Open, Fix & JGB Auction Killzone: 00:30 - 03:55 UTC (skips 04:00-06:29 Asian lunch lull)
+      if(minOfDay >= (0 * 60 + 30) && minOfDay <= (3 * 60 + 55))
          return SESSION_TOKYO_KILLZONE;
 
       // Late-Asian Accumulation: 03:56 - 06:29 UTC (236 - 389)
       if(minOfDay > (3 * 60 + 55) && minOfDay < (6 * 60 + 30))
          return SESSION_ASIAN_ACCUMULATION;
 
-      // London Judas Reversal Killzone: 06:30 - 06:55 UTC & 08:00 - 10:55 UTC (skip 07:00-07:55 London Open breakout impulse)
-      if((minOfDay >= (6 * 60 + 30) && minOfDay <= (6 * 60 + 55)) ||
-         (minOfDay >= (8 * 60) && minOfDay <= (10 * 60 + 55)))
+      // London & London-NY Overlap Killzone: 06:30 - 11:59 UTC
+      if(minOfDay >= (6 * 60 + 30) && minOfDay < (12 * 60))
          return SESSION_LONDON_KILLZONE;
 
-      // New York Post-Data & London Close Reversal Killzone: 13:00 - 16:45 UTC (skip 12:00-12:55 8:30am ET US macro impulse)
-      if(minOfDay >= (13 * 60) && minOfDay <= (16 * 60 + 45))
+      // New York & London Close Killzone: 12:00 - 16:45 UTC
+      if(minOfDay >= (12 * 60) && minOfDay <= (16 * 60 + 45))
          return SESSION_NY_KILLZONE;
 
       return SESSION_OUTSIDE_KILLZONE;
@@ -520,9 +657,10 @@ public:
          m_ref.atrM5Current    = ReadIndicatorScalar(m_handleAtrM5,  0, 1);
          m_ref.atrM15Current   = ReadIndicatorScalar(m_handleAtrM15, 0, 1);
          m_ref.atrH1Current    = ReadIndicatorScalar(m_handleAtrH1,  0, 1);
-         m_ref.atrH4Current    = ReadIndicatorScalar(m_handleAtrH4,  0, 1);
+         m_ref.atrH4Current    = ComputeBrokerAgnosticAtrH4();
 
          UpdateDailyAndAsianBoundaries(utcNow);
+         RebuildLiquidityPools();
         }
 
       if(m15BarTime != m_lastM15UpdateBarTime || m_poolCount == 0)
@@ -625,6 +763,10 @@ public:
         {
          if(MathAbs(poolPrice - m_ref.asianHigh) < 0.025 || MathAbs(poolPrice - m_preTokyoHigh) < 0.025)
             m_asianHighSweptToday = true;
+         if(MathAbs(poolPrice - m_earlyTokyoHigh) < 0.025)
+            m_earlyTokyoHighSweptToday = true;
+         if(MathAbs(poolPrice - m_earlyLondonHigh) < 0.025)
+            m_earlyLondonHighSweptToday = true;
          if(MathAbs(poolPrice - m_londonHigh) < 0.025)
             m_londonHighSweptToday = true;
         }
@@ -632,6 +774,10 @@ public:
         {
          if(MathAbs(poolPrice - m_ref.asianLow) < 0.025 || MathAbs(poolPrice - m_preTokyoLow) < 0.025)
             m_asianLowSweptToday = true;
+         if(MathAbs(poolPrice - m_earlyTokyoLow) < 0.025)
+            m_earlyTokyoLowSweptToday = true;
+         if(MathAbs(poolPrice - m_earlyLondonLow) < 0.025)
+            m_earlyLondonLowSweptToday = true;
          if(MathAbs(poolPrice - m_londonLow) < 0.025)
             m_londonLowSweptToday = true;
         }
@@ -645,7 +791,7 @@ public:
         }
       for(int i = 0; i < m_poolCount; i++)
         {
-         if(MathAbs(m_pools[i].price - poolPrice) < 0.035)
+         if(MathAbs(m_pools[i].price - poolPrice) < 0.030)
            {
             m_pools[i].isSwept   = true;
             m_pools[i].sweptTime = sweptTime;

@@ -214,22 +214,22 @@ private:
                                              m_tracker.sweepBarWickUSD / MathMax(0.01, m_tracker.sweepBarRangeUSD));
          bool   hasStrongBullBody  = (m5[0].close > m5[1].high && (m5[0].close - m5[0].open) >= (0.48 * bar0Range));
 
-         // In Early London (06:30-09:59 UTC), internal M15_SWING_LOW requires rejection wick >= 36% or strong engulfing body
-         if(m_tracker.poolType == LIQ_M15_SWING_LOW && dtUTC.hour <= 9 && bestLowerWickRatio < 0.36 && !hasStrongBullBody)
+         // In Early London (06:30-09:59 UTC), internal M15_SWING_LOW requires rejection wick >= 26% or strong engulfing body
+         if(m_tracker.poolType == LIQ_M15_SWING_LOW && dtUTC.hour <= 9 && bestLowerWickRatio < 0.26 && !hasStrongBullBody)
             return false;
 
          bool isPrimaryDisplacementReclaim = ((m_tracker.poolType == LIQ_ASIAN_LOW ||
                                                m_tracker.poolType == LIQ_PDL ||
                                                m_tracker.poolType == LIQ_EQUAL_LOWS) &&
                                               hasStrongBullBody &&
-                                              (isExpandedVol || bestLowerWickRatio >= 0.35));
+                                              (isExpandedVol || bestLowerWickRatio >= 0.28));
 
-         // If fading a confirmed H1/H4 Bearish trend, require rejection wick >= 42% (or primary displacement reclaim) and M5 close above bar[1].high
-         if(isCounterTrend && !isPrimaryDisplacementReclaim && (bestLowerWickRatio < 0.42 || m5[0].close <= m5[1].high))
+         // If fading a confirmed H1/H4 Bearish trend, require rejection wick >= 32% (or primary displacement reclaim) and M5 close above bar[1].high
+         if(isCounterTrend && !isPrimaryDisplacementReclaim && (bestLowerWickRatio < 0.32 || m5[0].close <= m5[1].high))
             return false;
 
-         // For M15_SWING_LOW pullback sweeps, require fast 1-2 bar rejection or lower wick >= 34%
-         if(m_tracker.poolType == LIQ_M15_SWING_LOW && m_tracker.m5BarsElapsed > 2 && bestLowerWickRatio < 0.34 && !hasStrongBullBody)
+         // For M15_SWING_LOW pullback sweeps, require fast 1-3 bar rejection or lower wick >= 26%
+         if(m_tracker.poolType == LIQ_M15_SWING_LOW && m_tracker.m5BarsElapsed > 3 && bestLowerWickRatio < 0.26 && !hasStrongBullBody)
             return false;
 
          // Bullish M5 3-candle FVG: Low of bar[0] (shift 1) > High of bar[2] (shift 3)
@@ -239,8 +239,8 @@ private:
             outFvgProximal = m5[0].low;
             outFvgDistal   = m5[2].high;
            }
-         // Bullish Minor MSS / Reclaim on M5: bar[0] closes above bar[1].high or shows rejection wick >= 24%
-         if(m5[0].close > m5[1].high || (m5[0].close > sweptLevelPrice && bestLowerWickRatio >= 0.24))
+         // Bullish Minor MSS / Reclaim on M5: bar[0] closes above bar[1].high or shows rejection wick >= 20%
+         if(m5[0].close > m5[1].high || (m5[0].close > sweptLevelPrice && bestLowerWickRatio >= 0.20))
            {
             outHasMSS   = true;
             outMssLevel = m5[1].high;
@@ -254,17 +254,15 @@ private:
 
          double bestUpperWickRatio = MathMax(upperWick / bar0Range,
                                              m_tracker.sweepBarWickUSD / MathMax(0.01, m_tracker.sweepBarRangeUSD));
-         bool   hasStrongBearBody  = (m5[0].close < m5[1].low && (m5[0].open - m5[0].close) >= (0.48 * bar0Range));
+         bool   hasStrongBearBody  = (m5[0].close < m5[1].low && (m5[0].open - m5[0].close) >= (0.45 * bar0Range));
 
-         // Allow LIQ_EQUAL_HIGHS always, plus LIQ_PDH / LIQ_ASIAN_HIGH / LIQ_M15_SWING_HIGH when H1/H4 is not bullish (macroBias <= 0)
-         // or when a major session high (PDH / ASIAN_HIGH) prints a strong >=48% rejection wick + engulfing close < m5[1].low
+         // Allow LIQ_EQUAL_HIGHS always, plus LIQ_ASIAN_HIGH when rejection wick >= 36% or strong bear body,
+         // plus LIQ_M15_SWING_HIGH when macroBias <= 0 and rejection wick >= 36%
          bool isAllowedShortPool = (m_tracker.poolType == LIQ_EQUAL_HIGHS) ||
-                                   (macroBias <= 0 && (m_tracker.poolType == LIQ_PDH ||
-                                                       m_tracker.poolType == LIQ_ASIAN_HIGH ||
-                                                       m_tracker.poolType == LIQ_M15_SWING_HIGH) &&
-                                    bestUpperWickRatio >= 0.42 && m5[0].close < m5[1].low) ||
-                                   ((m_tracker.poolType == LIQ_PDH || m_tracker.poolType == LIQ_ASIAN_HIGH) &&
-                                    bestUpperWickRatio >= 0.50 && hasStrongBearBody);
+                                   (m_tracker.poolType == LIQ_ASIAN_HIGH &&
+                                    (bestUpperWickRatio >= 0.36 || hasStrongBearBody)) ||
+                                   (m_tracker.poolType == LIQ_M15_SWING_HIGH &&
+                                    macroBias <= 0 && (bestUpperWickRatio >= 0.36 || hasStrongBearBody));
          if(!isAllowedShortPool)
             return false;
 
@@ -275,8 +273,8 @@ private:
             outFvgProximal = m5[0].high;
             outFvgDistal   = m5[2].low;
            }
-         // Bearish Minor MSS / Reclaim on M5: bar[0] closes below bar[1].low or shows rejection wick >= 24%
-         if(m5[0].close < m5[1].low || (m5[0].close < sweptLevelPrice && bestUpperWickRatio >= 0.24))
+         // Bearish Minor MSS / Reclaim on M5: bar[0] closes below bar[1].low or shows rejection wick >= 20%
+         if(m5[0].close < m5[1].low || (m5[0].close < sweptLevelPrice && bestUpperWickRatio >= 0.20))
            {
             outHasMSS   = true;
             outMssLevel = m5[1].low;
@@ -384,8 +382,8 @@ private:
       bool   isExpandedVol  = (m_sessionLevels.GetAdr20() >= 55.0);
       // Volatility-stationary sniper SL ceiling: scales with ATR(M5, 14) so more valid reclaims execute immediately at Market
       double maxImmediateSL = isCounterTrend
-                              ? MathMin(HARD_MAX_SL_DISTANCE_USD, MathMax(3.20, 1.65 * atrM5))
-                              : MathMin(HARD_MAX_SL_DISTANCE_USD, MathMax(4.20, 2.15 * atrM5));
+                              ? MathMin(HARD_MAX_SL_DISTANCE_USD, MathMax(3.60, 1.85 * atrM5))
+                              : MathMin(HARD_MAX_SL_DISTANCE_USD, MathMax(4.80, 2.45 * atrM5));
 
       // Evaluate SL distance at immediate reclaim close
       double candidateEntry = NormalizeSymbolPrice(m_symbol, reclaimClosePrice);
@@ -586,7 +584,7 @@ public:
         {
          m_lastClosedDirection   = direction;
          m_lastClosedTimeUTC     = closedTimeUTC;
-         m_lastClosedCooldownSec = 3600; // 1.0-hour same-direction cooldown only after an actual stop-out loss
+         m_lastClosedCooldownSec = 1500; // 25-minute same-direction cooldown only after an actual stop-out loss
         }
       else
         {
@@ -596,13 +594,20 @@ public:
         }
      }
 
-   //--- Check if same-direction cooldown is currently active
+   //--- Check if same-direction cooldown is currently active (applies to internal fractals; never blocks primary session boundaries)
    bool                 IsDirectionInCooldown(const ENUM_SIGNAL_DIRECTION direction,
+                                              const ENUM_LIQUIDITY_TYPE poolType,
                                               const datetime utcNow) const
      {
       if(m_lastClosedDirection == SIGNAL_NONE || m_lastClosedTimeUTC <= 0 || m_lastClosedCooldownSec <= 0)
          return false;
       if(direction != m_lastClosedDirection)
+         return false;
+      bool isInternalFractal = (poolType == LIQ_M15_SWING_LOW ||
+                                poolType == LIQ_M15_SWING_HIGH ||
+                                poolType == LIQ_EXTERNAL_LVN_LOW ||
+                                poolType == LIQ_EXTERNAL_LVN_HIGH);
+      if(!isInternalFractal)
          return false;
       return ((utcNow - m_lastClosedTimeUTC) <= m_lastClosedCooldownSec);
      }
@@ -689,8 +694,8 @@ public:
       double sma20Vol     = ComputeM5TickVolumeSMA20(1);
 
       double atrM15       = m_sessionLevels.GetAtrM15();
-      double minPierceUSD = MathMax(0.15, 0.08 * atrM15);
-      double maxPierceUSD = MathMax(m_maxSweepAtrRatio * atrM15, 0.90 * atrM15);
+      double minPierceUSD = MathMax(0.12, 0.06 * atrM15);
+      double maxPierceUSD = MathMax(m_maxSweepAtrRatio * atrM15, 0.95 * atrM15);
 
       // ================================================================
       // STEP 1: STATE_IDLE -> Check for Liquidity Pool or External LVN Sweep
@@ -838,7 +843,7 @@ public:
          // Condition B: Sweep or reclaim bar exhibits institutional volume participation (ONNX weighs exact f3_rel_tick_volume)
          double maxVolObserved = MathMax(m_tracker.sweepBarTickVol, closedVol);
          double relTickVolume  = maxVolObserved / MathMax(1.0, m_tracker.sma20TickVol);
-         bool   hasAbsorption  = (relTickVolume >= 1.05);
+         bool   hasAbsorption  = (relTickVolume >= 1.00);
 
          // Condition C: Minor Market Structure Shift (MSS) + 3-Candle FVG or clean VAH/VAL reclaim
          bool   hasFVG      = false;
@@ -850,7 +855,7 @@ public:
 
          if(closedBackInside && hasAbsorption)
            {
-            if(IsDirectionInCooldown(m_tracker.direction, utcNow))
+            if(IsDirectionInCooldown(m_tracker.direction, m_tracker.poolType, utcNow))
               {
                m_state = STATE_IDLE;
                m_tracker.Reset();

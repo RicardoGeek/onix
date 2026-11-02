@@ -134,6 +134,8 @@ def main() -> None:
 
     telemetry_candidates = [
         os.path.join(ARTIFACTS_DIR, "telemetry", "btcusd_pass1_setup_telemetry.csv"),
+        os.path.join(ARTIFACTS_DIR, "telemetry", "p1_v200_btcusd_setup_telemetry.csv"),
+        os.path.join(ARTIFACTS_DIR, "telemetry", "p2_dag_v200_btcusd_setup_telemetry.csv"),
         os.path.join(COMMON_FILES, "btcusd_setup_telemetry.csv"),
     ]
 
@@ -180,7 +182,7 @@ def main() -> None:
     cand["mfe_opt"] = mfe_list
 
     # Enforce the institutional $25.00 baseline spread floor on f11_spread_to_sl_ratio
-    sl_dist = np.maximum(80.0, cand["sl_distance_usd"].values.astype(np.float64))
+    sl_dist = np.maximum(65.0, cand["sl_distance_usd"].values.astype(np.float64))
     raw_spread = cand["f11_spread_to_sl_ratio"].values.astype(np.float64) * sl_dist
     cand["f11_spread_to_sl_ratio"] = np.clip(np.maximum(25.0, raw_spread) / sl_dist, 0.0, 1.0)
 
@@ -189,7 +191,7 @@ def main() -> None:
     r_vals = train_df["r_opt"].values.astype(np.float64)
     yrs = train_df["year"].values
     n, n_features = X_raw.shape
-    hidden_dim = 36
+    hidden_dim = 128
 
     means = X_raw.mean(axis=0)
     stds = np.maximum(1e-4, X_raw.std(axis=0))
@@ -197,23 +199,23 @@ def main() -> None:
 
     rng = np.random.default_rng(42)
     z_lin_w = np.zeros((n_features, 1), dtype=np.float64)
-    z_lin_b = 0.65
-    z_hid_w1 = rng.uniform(-0.40, 0.40, size=(n_features, hidden_dim))
-    z_hid_b1 = rng.uniform(-0.20, 0.20, size=(1, hidden_dim))
-    z_hid_w2 = rng.uniform(-0.50, 0.50, size=(hidden_dim, 1))
+    z_lin_b = 0.25
+    z_hid_w1 = rng.uniform(-0.50, 0.50, size=(n_features, hidden_dim))
+    z_hid_b1 = rng.uniform(-0.30, 0.30, size=(1, hidden_dim))
+    z_hid_w2 = rng.uniform(-0.60, 0.60, size=(hidden_dim, 1))
     z_hid_b2 = 0.0
 
-    y_t = np.where(r_vals <= 0.04, 0.01, np.where(r_vals >= 0.20, 0.98, 0.90)).reshape(-1, 1)
-    yr_boost = np.where(yrs == 2024, 1.35, 1.00)
-    w_s = np.where(r_vals <= 0.04, 6.20, np.where(r_vals >= 0.20, 5.20, 4.00)) * yr_boost
+    y_t = np.where(r_vals <= 0.04, 0.002, np.where(r_vals >= 0.20, 0.995, 0.94)).reshape(-1, 1)
+    yr_boost = np.where(yrs == 2024, 1.55, 1.00)
+    w_s = np.where(r_vals <= 0.04, 8.80, np.where(r_vals >= 0.20, 6.40, 4.80)) * yr_boost
     w_s = w_s.reshape(-1, 1)
     rv_col = r_vals.reshape(-1, 1)
 
-    lr, l2, epochs = 0.16, 0.00010, 6500
+    lr, l2, epochs = 0.28, 0.000015, 7500
     inv_n = 1.0 / float(max(1, n))
 
     for epoch in range(epochs):
-        step_lr = lr / (1.0 + 0.00045 * epoch)
+        step_lr = lr / (1.0 + 0.00028 * epoch)
         lin_logit = Z @ z_lin_w + z_lin_b
         pre_hid = np.clip(Z @ z_hid_w1 + z_hid_b1, -15.0, 15.0)
         h_act = np.tanh(pre_hid)
@@ -222,14 +224,14 @@ def main() -> None:
         prob = 1.0 / (1.0 + np.exp(-total_logit))
 
         dyn_w = w_s.copy()
-        lose_mask = (rv_col <= 0.04) & (prob > 0.38)
-        dyn_w[lose_mask] *= 1.0 + 34.0 * (prob[lose_mask] - 0.38)
+        lose_mask = (rv_col <= 0.04) & (prob > 0.28)
+        dyn_w[lose_mask] *= 1.0 + 85.0 * (prob[lose_mask] - 0.28)
 
-        win_big_mask = (rv_col >= 0.20) & (prob < 0.86)
-        dyn_w[win_big_mask] *= 1.0 + 22.0 * (0.86 - prob[win_big_mask])
+        win_big_mask = (rv_col >= 0.20) & (prob < 0.90)
+        dyn_w[win_big_mask] *= 1.0 + 35.0 * (0.90 - prob[win_big_mask])
 
-        win_mid_mask = (rv_col > 0.04) & (rv_col < 0.20) & (prob < 0.78)
-        dyn_w[win_mid_mask] *= 1.0 + 15.0 * (0.78 - prob[win_mid_mask])
+        win_mid_mask = (rv_col > 0.04) & (rv_col < 0.20) & (prob < 0.82)
+        dyn_w[win_mid_mask] *= 1.0 + 24.0 * (0.82 - prob[win_mid_mask])
 
         err = (prob - y_t) * dyn_w
 

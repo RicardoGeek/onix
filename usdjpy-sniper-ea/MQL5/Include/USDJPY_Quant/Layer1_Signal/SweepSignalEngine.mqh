@@ -196,10 +196,7 @@ private:
 
       if(direction == SIGNAL_LONG)
         {
-         if(m_tracker.poolType == LIQ_EXTERNAL_LVN_LOW || m_tracker.poolType == LIQ_PDL)
-            return false;
-
-         if(dtUTC.hour == 10 || dtUTC.hour == 15)
+         if(m_tracker.poolType == LIQ_EXTERNAL_LVN_LOW)
             return false;
 
          if(m5[0].close <= m5[0].open)
@@ -208,13 +205,16 @@ private:
          double bestLowerWickRatio = MathMax(lowerWick / bar0Range,
                                              m_tracker.sweepBarWickUSD / MathMax(0.003, m_tracker.sweepBarRangeUSD));
 
-         if(m_tracker.poolType == LIQ_M15_SWING_LOW && (dtUTC.hour >= 6 && dtUTC.hour <= 9) && bestLowerWickRatio < 0.42)
+         if(m_tracker.poolType == LIQ_PDL && bestLowerWickRatio < 0.28 && m5[0].close <= m5[1].high)
             return false;
 
-         if(isCounterTrend && (bestLowerWickRatio < 0.48 || m5[0].close <= m5[1].high))
+         if(m_tracker.poolType == LIQ_M15_SWING_LOW && (dtUTC.hour >= 6 && dtUTC.hour <= 9) && bestLowerWickRatio < 0.26)
             return false;
 
-         if(m_tracker.poolType == LIQ_M15_SWING_LOW && m_tracker.m5BarsElapsed > 2 && bestLowerWickRatio < 0.38)
+         if(isCounterTrend && (bestLowerWickRatio < 0.36 || m5[0].close <= m5[1].high))
+            return false;
+
+         if(m_tracker.poolType == LIQ_M15_SWING_LOW && m_tracker.m5BarsElapsed > 2 && bestLowerWickRatio < 0.28)
             return false;
 
          if(m5[0].low > m5[2].high)
@@ -223,7 +223,7 @@ private:
             outFvgProximal = m5[0].low;
             outFvgDistal   = m5[2].high;
            }
-         if(m5[0].close > m5[1].high || (m5[0].close > sweptLevelPrice && (lowerWick / bar0Range) >= 0.28))
+         if(m5[0].close > m5[1].high || (m5[0].close > sweptLevelPrice && (lowerWick / bar0Range) >= 0.22))
            {
             outHasMSS   = true;
             outMssLevel = m5[1].high;
@@ -231,10 +231,11 @@ private:
         }
       else if(direction == SIGNAL_SHORT)
         {
-         // On USDJPY, upside breakouts of Asian High / PDH are trend continuations (carry drift); only fade Equal Highs & M15 Swing Highs
-         if(m_tracker.poolType == LIQ_EXTERNAL_LVN_HIGH ||
-            m_tracker.poolType == LIQ_ASIAN_HIGH ||
-            m_tracker.poolType == LIQ_PDH)
+         if(m_tracker.poolType == LIQ_EXTERNAL_LVN_HIGH)
+            return false;
+
+         // Block bull-trend PDH short fades; allow Asian High, Equal Highs, M15 Swing Highs, and non-bull PDH sweeps
+         if(macroBias == 1 && m_tracker.poolType == LIQ_PDH)
             return false;
 
          if(m5[0].close >= m5[0].open)
@@ -243,13 +244,16 @@ private:
          double bestUpperWickRatio = MathMax(upperWick / bar0Range,
                                              m_tracker.sweepBarWickUSD / MathMax(0.003, m_tracker.sweepBarRangeUSD));
 
-         if(macroBias == 1 && m_tracker.poolType == LIQ_M15_SWING_HIGH)
+         if(m_tracker.poolType == LIQ_ASIAN_HIGH && bestUpperWickRatio < 0.34 && m5[0].close >= m5[1].low)
             return false;
 
-         if(isCounterTrend && (bestUpperWickRatio < 0.48 || m5[0].close >= m5[1].low))
+         if(macroBias == 1 && m_tracker.poolType == LIQ_M15_SWING_HIGH && bestUpperWickRatio < 0.38)
             return false;
 
-         if(m_tracker.poolType == LIQ_M15_SWING_HIGH && m_tracker.m5BarsElapsed > 2 && bestUpperWickRatio < 0.40)
+         if(isCounterTrend && (bestUpperWickRatio < 0.38 || m5[0].close >= m5[1].low))
+            return false;
+
+         if(m_tracker.poolType == LIQ_M15_SWING_HIGH && m_tracker.m5BarsElapsed > 2 && bestUpperWickRatio < 0.30)
             return false;
 
          if(m5[0].high < m5[2].low)
@@ -258,7 +262,7 @@ private:
             outFvgProximal = m5[0].high;
             outFvgDistal   = m5[2].low;
            }
-         if(m5[0].close < m5[1].low || (m5[0].close < sweptLevelPrice && (upperWick / bar0Range) >= 0.28))
+         if(m5[0].close < m5[1].low || (m5[0].close < sweptLevelPrice && (upperWick / bar0Range) >= 0.22))
            {
             outHasMSS   = true;
             outMssLevel = m5[1].low;
@@ -304,7 +308,7 @@ private:
            }
         }
 
-      // 3. Also check clean Value Area Reclaim (reclaim of VAL for Long or VAH for Short)
+      // 3. Also check clean Value Area Reclaim (reclaim of VAL for Long or VAH for Short) or strong structural reclaim
       bool cleanValueAreaReclaim = false;
       if(vp.isValid)
         {
@@ -314,10 +318,18 @@ private:
             cleanValueAreaReclaim = true;
         }
 
-      if(isCounterTrend)
-         return (outHasMSS && outHasFVG && cleanValueAreaReclaim);
+      bool strongStructuralReclaim = false;
+      if(direction == SIGNAL_LONG && m5[0].close > sweptLevelPrice &&
+         (m5[0].close > m5[1].high || (lowerWick / bar0Range) >= 0.30))
+         strongStructuralReclaim = true;
+      else if(direction == SIGNAL_SHORT && m5[0].close < sweptLevelPrice &&
+              (m5[0].close < m5[1].low || (upperWick / bar0Range) >= 0.30))
+         strongStructuralReclaim = true;
 
-      return (outHasMSS && (outHasFVG || cleanValueAreaReclaim));
+      if(isCounterTrend)
+         return (outHasMSS && (outHasFVG || cleanValueAreaReclaim || strongStructuralReclaim));
+
+      return (outHasMSS && (outHasFVG || cleanValueAreaReclaim || strongStructuralReclaim));
      }
 
    //--- Construct Sniper Entry, Structural SL outside sweep extreme, TP1 @ +0.62R, and TP2 @ +3.50R
@@ -347,8 +359,8 @@ private:
                               (m_tracker.direction == SIGNAL_LONG  && macroBias == -1));
 
       double maxImmediateSL = isCounterTrend
-                              ? MathMin(HARD_MAX_SL_DISTANCE_USD, MathMax(0.220, 1.35 * atrM5))
-                              : MathMin(HARD_MAX_SL_DISTANCE_USD, MathMax(0.320, 1.85 * atrM5));
+                              ? MathMin(HARD_MAX_SL_DISTANCE_USD, MathMax(0.260, 1.75 * atrM5))
+                              : MathMin(HARD_MAX_SL_DISTANCE_USD, MathMax(0.380, 2.35 * atrM5));
 
       double candidateEntry = NormalizeSymbolPrice(m_symbol, reclaimClosePrice);
       double slDistanceUSD  = (m_tracker.direction == SIGNAL_LONG)
@@ -529,11 +541,11 @@ public:
                                            const double realizedR,
                                            const datetime closedTimeUTC)
      {
-      if(realizedR < -0.05)
+      if(realizedR < -0.15)
         {
          m_lastClosedDirection   = direction;
          m_lastClosedTimeUTC     = closedTimeUTC;
-         m_lastClosedCooldownSec = 5400;
+         m_lastClosedCooldownSec = 1500;
         }
       else
         {
@@ -544,11 +556,18 @@ public:
      }
 
    bool                 IsDirectionInCooldown(const ENUM_SIGNAL_DIRECTION direction,
+                                              const ENUM_LIQUIDITY_TYPE poolType,
                                               const datetime utcNow) const
      {
       if(m_lastClosedDirection == SIGNAL_NONE || m_lastClosedTimeUTC <= 0 || m_lastClosedCooldownSec <= 0)
          return false;
       if(direction != m_lastClosedDirection)
+         return false;
+      bool isInternalFractal = (poolType == LIQ_M15_SWING_LOW ||
+                                poolType == LIQ_M15_SWING_HIGH ||
+                                poolType == LIQ_EXTERNAL_LVN_LOW ||
+                                poolType == LIQ_EXTERNAL_LVN_HIGH);
+      if(!isInternalFractal)
          return false;
       return ((utcNow - m_lastClosedTimeUTC) <= m_lastClosedCooldownSec);
      }
@@ -621,8 +640,8 @@ public:
       double sma20Vol     = ComputeM5TickVolumeSMA20(1);
 
       double atrM15       = m_sessionLevels.GetAtrM15();
-      double minPierceUSD = MathMax(0.012, 0.08 * atrM15);
-      double maxPierceUSD = MathMax(m_maxSweepAtrRatio * atrM15, 0.90 * atrM15);
+      double minPierceUSD = MathMax(0.010, 0.06 * atrM15);
+      double maxPierceUSD = MathMax(m_maxSweepAtrRatio * atrM15, 1.05 * atrM15);
 
       if(m_state == STATE_IDLE)
         {
@@ -723,7 +742,7 @@ public:
 
          double maxVolObserved = MathMax(m_tracker.sweepBarTickVol, closedVol);
          double relTickVolume  = maxVolObserved / MathMax(1.0, m_tracker.sma20TickVol);
-         bool   hasAbsorption  = (relTickVolume >= 1.05);
+         bool   hasAbsorption  = (relTickVolume >= 0.95);
 
          bool   hasFVG      = false;
          double fvgProximal = 0.0;
@@ -734,7 +753,7 @@ public:
 
          if(closedBackInside && hasAbsorption)
            {
-            if(IsDirectionInCooldown(m_tracker.direction, utcNow))
+            if(IsDirectionInCooldown(m_tracker.direction, m_tracker.poolType, utcNow))
               {
                m_state = STATE_IDLE;
                m_tracker.Reset();

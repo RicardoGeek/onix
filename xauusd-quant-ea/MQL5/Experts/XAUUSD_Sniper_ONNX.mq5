@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Principal Quantitative Systems Engineering"
 #property link      "https://www.mql5.com"
-#property version   "4.25"
+#property version   "4.32"
 #property description "XAUUSD Institutional Liquidity Sweep + M1 Volume Profile + Native ONNX Meta-Labeling EA"
 #property description "Strict Single-Position Sniper Execution | 3.0% Daily / 6.0% Total Drawdown Hard Ceiling"
 #property strict
@@ -16,6 +16,7 @@
 //--- Modular Architecture Includes
 #include "../Include/XAUUSD_Quant/Core/Definitions.mqh"
 #include "../Include/XAUUSD_Quant/Core/Logger.mqh"
+#include "../Include/XAUUSD_Quant/Core/GoldeenTelemetry.mqh"
 #include "../Include/XAUUSD_Quant/Layer1_Signal/SessionLevels.mqh"
 #include "../Include/XAUUSD_Quant/Layer1_Signal/VolumeProfile.mqh"
 #include "../Include/XAUUSD_Quant/Layer1_Signal/SweepSignalEngine.mqh"
@@ -66,6 +67,10 @@ input bool           InpCsvUseCommonFolder        = false;              // Write
 input ENUM_LOG_LEVEL InpLogLevel                  = LOG_INFO;           // Minimum Journal Logging Verbosity
 input bool           InpShowChartHUD              = true;               // Render Real-Time Institutional HUD on Chart
 
+input group "=== [6] GOLDEEN.IO FLEET TELEMETRY (REDIS INSTANT QUEUE) ==="
+input string         InpGoldeenToken              = "";                 // Goldeen.io EA Token (gld_ea_... | Empty = Disabled)
+input string         InpGoldeenUrl                = "https://api.goldeen.io/api/v1/ea/report"; // Goldeen Telemetry Endpoint
+
 //+------------------------------------------------------------------+
 //| Global Modular Subsystem Instances                               |
 //+------------------------------------------------------------------+
@@ -78,8 +83,11 @@ COnnxMetaLabeler   g_onnxLabeler;
 CEquityGuard       g_equityGuard;
 CPositionSizer     g_positionSizer;
 CExecutionManager  g_executionManager;
+CGoldeenTelemetry  g_goldeen;
 
-datetime           g_lastHudUpdateTime = 0;
+datetime           g_lastHudUpdateTime   = 0;
+string             g_lastModelCallStr    = "NONE YET (WAITING FOR M5 SWEEP)";
+string             g_lastModelDecisionStr = "N/A (Threshold: Tier2 >= 0.58 | Tier1 >= 0.72)";
 
 //+------------------------------------------------------------------+
 //| Render Real-Time Institutional Telemetry HUD                     |
@@ -113,6 +121,8 @@ void UpdateChartHUD()
       "========================================================\n"
       " [MODE]       : %s (%s)\n"
       " [ONNX AI]    : %s | Ready: %s\n"
+      " [LAST CALL]  : %s\n"
+      " [LAST DECIS] : %s\n"
       " [CLOCK / GMT]: UTC%+.2f (%s) | Server: %s | UTC: %s\n"
       " [SESSION]    : %s | Tradable Regime: %s\n"
       "--------------------------------------------------------\n"
@@ -136,6 +146,8 @@ void UpdateChartHUD()
       (riskSnap.ddType == DD_TRAILING_HWM ? "TRAILING_HWM" : "STATIC_INITIAL"),
       (InpUseOnnxModel ? "NATIVE_ONNX" : "DETERMINISTIC_COLLECTION"),
       (g_onnxLabeler.IsModelReady() ? "YES" : "FALLBACK"),
+      g_lastModelCallStr,
+      g_lastModelDecisionStr,
       effOffsetHrs,
       (MQLInfoInteger(MQL_TESTER) ? "TESTER_CFG" : "AUTO_GMT"),
       TimeToString(now, TIME_MINUTES),
@@ -317,6 +329,17 @@ int OnInit()
       "XAUUSD_Sniper_ONNX v%s Initialized Successfully [Mode=%s | UseONNX=%s]",
       QUANT_EA_VERSION, RiskModeToString(InpRiskMode), (InpUseOnnxModel ? "TRUE" : "FALSE")));
 
+   g_goldeen.Init(InpGoldeenToken,
+                  InpGoldeenUrl,
+                  "XAUUSD_Sniper_ONNX",
+                  QUANT_EA_VERSION,
+                  "Sniper ONNX",
+                  _Symbol,
+                  InpMagicNumber,
+                  InpMagicNumber);
+   if(g_goldeen.IsEnabled())
+      EventSetTimer(2);
+
    UpdateChartHUD();
    return INIT_SUCCEEDED;
   }
@@ -326,6 +349,8 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   if(g_goldeen.IsEnabled())
+      EventKillTimer();
    g_onnxLabeler.Deinit();
    g_featureExtractor.Deinit();
    g_sessionLevels.Deinit();
@@ -395,6 +420,22 @@ void OnTick()
    SOnnxPrediction prediction;
    g_onnxLabeler.PredictProbability(features, prediction);
 
+   // Update Real-Time HUD Last Model Call & Decision Telemetry
+   g_lastModelCallStr = StringFormat("%s UTC | %s @ %s (%.2f)",
+                                     TimeToString(candidateSetup.signalTimeUTC, TIME_DATE|TIME_MINUTES),
+                                     DirectionToString(candidateSetup.direction),
+                                     LiquidityTypeToString(candidateSetup.sweptPoolType),
+                                     candidateSetup.sweptLevelPrice);
+   if(prediction.riskTier == 1)
+      g_lastModelDecisionStr = StringFormat("Score=%.3f vs %.2f (T1>=%.2f) -> APPROVED [TIER 1]",
+                                            prediction.winProbability, InpOnnxTier2Threshold, InpOnnxTier1Threshold);
+   else if(prediction.riskTier == 2)
+      g_lastModelDecisionStr = StringFormat("Score=%.3f vs %.2f (T1>=%.2f) -> APPROVED [TIER 2]",
+                                            prediction.winProbability, InpOnnxTier2Threshold, InpOnnxTier1Threshold);
+   else
+      g_lastModelDecisionStr = StringFormat("Score=%.3f < %.2f threshold -> FILTERED",
+                                            prediction.winProbability, InpOnnxTier2Threshold);
+
    // Log candidate setup and its 12 stationary features to CSV for ML training / audit
    g_logger.WriteSetupTelemetryCSV(candidateSetup, features, prediction, "SIGNAL_TRIGGERED");
 
@@ -452,6 +493,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeResult &result)
   {
    g_executionManager.OnTradeTransaction(trans, request, result);
+   g_goldeen.OnTradeTransactionWatch(trans);
 
    ENUM_SIGNAL_DIRECTION closedDir = SIGNAL_NONE;
    double closedR = 0.0;
@@ -459,6 +501,32 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       g_sweepEngine.NotifyTradeOutcome(closedDir, closedR, ResolveCurrentUTCTime(InpBrokerGMTOffsetHours));
   }
 
+
+//+------------------------------------------------------------------+
+//| Timer function: Non-Blocking Goldeen.io Telemetry Sync           |
+//+------------------------------------------------------------------+
+void OnTimer()
+  {
+   if(!g_goldeen.IsEnabled())
+      return;
+
+   SRiskStateSnapshot riskSnap;
+   g_equityGuard.GetRiskStateSnapshot(riskSnap);
+
+   string statusStr = (riskSnap.tradingHaltedToday || riskSnap.permanentLockout)
+                      ? ("HALTED: " + BreachReasonToString(riskSnap.activeBreachReason))
+                      : SweepStateToString(g_sweepEngine.GetCurrentState());
+
+   g_goldeen.OnTimerCheck(riskSnap.highWaterMark,
+                          riskSnap.dailyRealizedPnLUSD,
+                          riskSnap.dailyRealizedPnLPct,
+                          riskSnap.dailyDrawdownPct,
+                          3.00,
+                          riskSnap.totalDrawdownPct,
+                          HARD_MAX_TOTAL_DD_CEILING_PCT,
+                          g_lastModelDecisionStr,
+                          statusStr);
+  }
 //+------------------------------------------------------------------+
 //| Tester function: Institutional Prop-Safe Optimization Criterion  |
 //+------------------------------------------------------------------+
