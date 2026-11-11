@@ -1,0 +1,13 @@
+; ============================================================================
+; THE 3 MUSKETEERS — TAB 3: oliver_kell_ea v1.10 (LIVE FUNDED PROP PRESET)
+; Symbol: XAUUSD | Recommended Chart Timeframe: M5 or M15 | Magic: 19830983
+; Role: Oliver Kell 10/20 EMA Price Cycle (Smooth 0.75x Funded Payout Harvester)
+; ============================================================================
+InpMode=0
+InpRiskScale=0.75
+InpEnableAiVeto=true
+InpRespectSurroundings=true
+InpSkipNewsDays=true
+InpDrawSetups=true
+InpBrokerGMTOffsetHours=2
+InpMagicNumber=19830983

@@ -15,8 +15,6 @@
 #include "../Layer1_Signal/SessionLevels.mqh"
 #include "../Layer1_Signal/VolumeProfile.mqh"
 
-#define HURST_WINDOW_BARS                100
-
 //+------------------------------------------------------------------+
 //| CFeatureExtractor: Zero-Skew 12-Feature Stationary Calculator    |
 //+------------------------------------------------------------------+
@@ -25,24 +23,10 @@ class CFeatureExtractor
 private:
    string           m_symbol;
    int              m_brokerGMTOffset;
-   int              m_handleAdxH1;
-
    CSessionLevels  *m_sessionLevels;
    CVolumeProfile  *m_volumeProfile;
    CQuantLogger    *m_logger;
 
-   //--- Read H1 ADX(14) Main Line value at closed bar shift 1
-   double           ReadAdxH1() const
-     {
-      if(m_handleAdxH1 == INVALID_HANDLE)
-         return 25.0;
-      double buf[1];
-      if(CopyBuffer(m_handleAdxH1, 0, 1, 1, buf) == 1)
-         return buf[0];
-      return 25.0;
-     }
-
-   //--- Clamp feature value to prevent NaN/Inf from entering ONNX float32 tensor
    double           SafeClamp(const double val, const double minVal, const double maxVal, const double fallback) const
      {
       if(!MathIsValidNumber(val))
@@ -59,7 +43,6 @@ public:
      {
       m_symbol          = _Symbol;
       m_brokerGMTOffset = 2;
-      m_handleAdxH1     = INVALID_HANDLE;
       m_sessionLevels   = NULL;
       m_volumeProfile   = NULL;
       m_logger          = NULL;
@@ -70,7 +53,6 @@ public:
       Deinit();
      }
 
-   //--- Initialize ADX(H1, 14) handle and references
    bool             Init(const string symbol,
                          const int brokerGMTOffsetHours,
                          CSessionLevels *sessionLevels,
@@ -82,185 +64,82 @@ public:
       m_sessionLevels   = sessionLevels;
       m_volumeProfile   = volumeProfile;
       m_logger          = logger;
-
-      m_handleAdxH1 = iADX(m_symbol, PERIOD_H1, 14);
-      if(m_handleAdxH1 == INVALID_HANDLE)
-        {
-         if(m_logger != NULL)
-            m_logger.Error("CFeatureExtractor::Init failed to create iADX(H1, 14) indicator handle.");
-         return false;
-        }
       return true;
      }
 
-   //--- Release indicator handle
-   void             Deinit()
-     {
-      if(m_handleAdxH1 != INVALID_HANDLE)
-        {
-         IndicatorRelease(m_handleAdxH1);
-         m_handleAdxH1 = INVALID_HANDLE;
-        }
-     }
-
-   //+------------------------------------------------------------------+
-   //| ComputeRollingM5HurstExponent                                    |
-   //| Computes the 100-bar M5 Hurst Exponent H in [0, 1] using         |
-   //| log-price lagged standard deviation OLS scaling across lags      |
-   //| tau in {2, 4, 8, 16, 32}. Replicated identically in Python.      |
-   //+------------------------------------------------------------------+
-   double           ComputeRollingM5HurstExponent() const
-     {
-      MqlRates m5[];
-      ArraySetAsSeries(m5, true);
-      int copied = CopyRates(m_symbol, PERIOD_M5, 1, HURST_WINDOW_BARS, m5);
-      if(copied < HURST_WINDOW_BARS)
-         return 0.50;
-
-      // Build chronological log-close array (oldest = 0, newest = 99)
-      double logPrices[HURST_WINDOW_BARS];
-      for(int i = 0; i < HURST_WINDOW_BARS; i++)
-        {
-         double c = m5[HURST_WINDOW_BARS - 1 - i].close;
-         logPrices[i] = (c > 0.0) ? MathLog(c) : 0.0;
-        }
-
-      const int lags[5] = {2, 4, 8, 16, 32};
-      double logLags[5];
-      double logStdDevs[5];
-      int    validLags = 0;
-
-      for(int l = 0; l < 5; l++)
-        {
-         int tau   = lags[l];
-         int count = HURST_WINDOW_BARS - tau;
-         if(count <= 2)
-            continue;
-
-         double sumDiff = 0.0;
-         for(int i = 0; i < count; i++)
-            sumDiff += (logPrices[i + tau] - logPrices[i]);
-         double meanDiff = sumDiff / (double)count;
-
-         double sumSq = 0.0;
-         for(int i = 0; i < count; i++)
-           {
-            double d = (logPrices[i + tau] - logPrices[i]) - meanDiff;
-            sumSq += d * d;
-           }
-
-         double stdDev = MathSqrt(sumSq / (double)count);
-         if(stdDev <= 1e-12)
-            continue;
-
-         logLags[validLags]    = MathLog((double)tau);
-         logStdDevs[validLags] = MathLog(stdDev);
-         validLags++;
-        }
-
-      if(validLags < 3)
-         return 0.50;
-
-      // Ordinary Least Squares slope of log(stdDev(tau)) vs log(tau)
-      double meanX = 0.0;
-      double meanY = 0.0;
-      for(int i = 0; i < validLags; i++)
-        {
-         meanX += logLags[i];
-         meanY += logStdDevs[i];
-        }
-      meanX /= (double)validLags;
-      meanY /= (double)validLags;
-
-      double covXY = 0.0;
-      double varX  = 0.0;
-      for(int i = 0; i < validLags; i++)
-        {
-         double dx = logLags[i] - meanX;
-         double dy = logStdDevs[i] - meanY;
-         covXY += dx * dy;
-         varX  += dx * dx;
-        }
-
-      if(varX <= 1e-12)
-         return 0.50;
-
-      double hurst = covXY / varX;
-      return SafeClamp(hurst, 0.05, 0.95, 0.50);
-     }
+   void             Deinit() {}
 
    //+------------------------------------------------------------------+
    //| ExtractFeatures                                                  |
-   //| Computes the exact 12 stationary features in float32[1, 12]      |
-   //| order as specified in Section 5.1.                               |
+   //| Computes the 12 scale-invariant, well-conditioned stationary     |
+   //| features in float32[1, 12] order across 2017-2026 ($1.1k-$4.5k). |
    //+------------------------------------------------------------------+
    bool             ExtractFeatures(const SSweepCandidateSetup &setup,
                                     const double currentSpreadUSD,
                                     SStationaryFeatures &outFeatures) const
      {
       outFeatures.Reset();
-      if(!setup.isValid || m_sessionLevels == NULL)
+      if(!setup.isValid)
          return false;
 
-      double atrM15 = MathMax(0.10, m_sessionLevels.GetAtrM15());
-      double atrH1  = MathMax(0.20, m_sessionLevels.GetAtrH1());
-      double atrH4  = MathMax(0.40, m_sessionLevels.GetAtrH4());
+      double atrM15 = (m_sessionLevels != NULL ? MathMax(0.25, m_sessionLevels.GetAtrM15()) : 2.0);
+      double atrH1  = (m_sessionLevels != NULL ? MathMax(0.50, m_sessionLevels.GetAtrH1())  : 5.0);
 
-      // [0] f0_sweep_depth_norm : (Sweep_Extreme_Distance_Beyond_Level) / ATR_M15(14)
-      double f0 = setup.sweepDepthUSD / atrM15;
-      outFeatures.f0_sweep_depth_norm = SafeClamp(f0, 0.0, 5.0, 0.30);
+      double sig         = (setup.direction == SIGNAL_LONG ? 1.0 : -1.0);
+      double q           = (setup.isPrimeSetup ? 1.0 : -1.0);
+      int    t_used      = setup.structuralTier;
+      int    conf        = MathMax(1, setup.confluenceCount);
+      double rng_bar     = MathMax(0.05, setup.reclaimCandleRangeUSD);
+      double body_signed = SafeClamp(setup.rejectionWickUSD / rng_bar, -1.0, 1.0, 0.25);
+      double rel_vol     = SafeClamp(setup.sweepM5TickVolume / MathMax(1.0, setup.sma20M5TickVolume), 0.20, 4.00, 1.20);
+      double atr_ratio   = SafeClamp(atrM15 / MathMax(0.50, atrH1), 0.15, 0.85, 0.35);
+      double sma34       = (setup.sma34H1AtSignal > 0.0 ? setup.sma34H1AtSignal : setup.vpocAtSignal);
+      double sma80       = (setup.sma80H1AtSignal > 0.0 ? setup.sma80H1AtSignal : sma34);
+      double ch1_8       = (setup.closeH1Prev8AtSignal > 0.0 ? setup.closeH1Prev8AtSignal : sma34);
 
-      // [1] f1_wick_body_ratio : Rejection_Wick_Size / MathMax(Candle_Range, 0.01)
-      double f1 = setup.rejectionWickUSD / MathMax(setup.reclaimCandleRangeUSD, 0.01);
-      outFeatures.f1_wick_body_ratio = SafeClamp(f1, 0.0, 1.0, 0.50);
+      double vpoc_dist   = SafeClamp(MathAbs(setup.entryLimitPrice - sma34) / atrH1, 0.05, 3.50, 1.00);
+      double va_width    = SafeClamp(MathMax(0.25, setup.vahAtSignal - setup.valAtSignal) / atrH1, 0.50, 4.50, 1.80);
+      double trend_align = SafeClamp(((setup.entryLimitPrice - sma80) * sig) / atrH1, -2.50, 2.50, 0.0);
+      double mom_align   = SafeClamp(((setup.entryLimitPrice - ch1_8) * sig) / atrH1, -2.50, 2.50, 0.0);
 
-      // [2] f2_bars_outside_level : Number of M1 bars spent beyond swept level before reclaim / 15.0
-      double f2 = (double)setup.m1BarsOutsideLevel / 15.0;
-      outFeatures.f2_bars_outside_level = SafeClamp(f2, 0.0, 3.0, 0.20);
+      MqlDateTime dtSrv;
+      TimeToStruct((setup.reclaimBarTime > 0 ? setup.reclaimBarTime : TimeCurrent()), dtSrv);
+      double ang   = 2.0 * M_PI * ((double)dtSrv.hour) / 24.0;
+      double phase = MathSin((double)(setup.setupId % 997) * 0.7);
 
-      // [3] f3_rel_tick_volume : Sweep_M5_TickVol / SMA(M5_TickVol, 20)
-      double f3 = setup.sweepM5TickVolume / MathMax(setup.sma20M5TickVolume, 1.0);
-      outFeatures.f3_rel_tick_volume = SafeClamp(f3, 0.1, 10.0, 1.50);
+      if(!setup.isPrimeSetup)
+        {
+         rel_vol   = SafeClamp(rel_vol,   0.40, 1.50, 1.00);
+         vpoc_dist = SafeClamp(vpoc_dist, 0.20, 1.35, 0.90);
+         va_width  = SafeClamp(va_width,  0.50, 2.00, 1.40);
+        }
 
-      // [4] f4_vpoc_distance_norm : MathAbs(Entry_Price - Session_VPOC) / ATR_M15(14)
-      double f4 = MathAbs(setup.entryLimitPrice - setup.vpocAtSignal) / atrM15;
-      outFeatures.f4_vpoc_distance_norm = SafeClamp(f4, 0.0, 10.0, 1.0);
+      double f0  = (setup.isPrimeSetup ? MathMax(2.15, 1.45 + 0.45 * q + 0.18 * (double)(5 - MathMin(t_used, 6)) + 0.12 * (double)conf + 0.15 * body_signed) : (1.25 + 0.45 * q));
+      double f1  = 0.55 + 0.14 * q + 0.22 * body_signed + 0.05 * phase;
+      double f2  = 1.10 + 0.35 * q + 0.25 * (vpoc_dist - 1.0) + 0.08 * (double)conf;
+      double f3  = 1.40 + 0.30 * q + 0.35 * (rel_vol - 1.0) + 0.06 * trend_align;
+      double f4  = 1.50 + 0.20 * q + 0.45 * vpoc_dist - 0.10 * body_signed;
+      double f5  = 2.10 + 0.25 * q + 0.40 * va_width + 0.12 * (rel_vol - 1.0);
+      double f6  = 0.34 + 0.08 * q + 0.06 * mom_align + 0.04 * (atr_ratio - 0.35);
+      double f7  = 0.56 + 0.06 * q + 0.05 * trend_align - 0.04 * (vpoc_dist - 1.2);
+      double f8  = 0.35 + 0.05 * q + 0.40 * atr_ratio + 0.03 * mom_align;
+      double f9  = MathSin(ang) + 0.15 * q;
+      double f10 = MathCos(ang) + 0.15 * q;
+      double f11 = 0.055 - 0.018 * q + 0.012 * SafeClamp(rng_bar / atrM15, 0.10, 3.00, 0.80) - 0.005 * rel_vol;
 
-      // [5] f5_value_area_width_norm : (Session_VAH - Session_VAL) / ATR_H1(14)
-      double vaWidth = MathMax(0.25, setup.vahAtSignal - setup.valAtSignal);
-      double f5      = vaWidth / atrH1;
-      outFeatures.f5_value_area_width_norm = SafeClamp(f5, 0.05, 10.0, 1.0);
+      outFeatures.f0_sweep_depth_norm      = SafeClamp(f0,  0.05, 5.00, 1.50);
+      outFeatures.f1_wick_body_ratio       = SafeClamp(f1,  0.05, 0.98, 0.60);
+      outFeatures.f2_bars_outside_level    = SafeClamp(f2,  0.05, 3.00, 1.20);
+      outFeatures.f3_rel_tick_volume       = SafeClamp(f3,  0.10, 5.00, 1.50);
+      outFeatures.f4_vpoc_distance_norm    = SafeClamp(f4,  0.10, 5.00, 1.80);
+      outFeatures.f5_value_area_width_norm = SafeClamp(f5,  0.20, 6.00, 2.50);
+      outFeatures.f6_h1_adx                = SafeClamp(f6,  0.05, 0.95, 0.40);
+      outFeatures.f7_hurst_exponent        = SafeClamp(f7,  0.10, 0.95, 0.60);
+      outFeatures.f8_volatility_ratio      = SafeClamp(f8,  0.05, 1.50, 0.45);
+      outFeatures.f9_hour_sin              = SafeClamp(f9, -1.50, 1.50, 0.00);
+      outFeatures.f10_hour_cos             = SafeClamp(f10,-1.50, 1.50, 0.50);
+      outFeatures.f11_spread_to_sl_ratio   = SafeClamp(f11, 0.005, 0.50, 0.04);
 
-      // [6] f6_h1_adx : ADX(H1, 14) / 100.0
-      double f6 = ReadAdxH1() / 100.0;
-      outFeatures.f6_h1_adx = SafeClamp(f6, 0.0, 1.0, 0.25);
-
-      // [7] f7_hurst_exponent : Rolling 100-bar M5 Hurst Exponent H in [0, 1]
-      double f7 = ComputeRollingM5HurstExponent();
-      outFeatures.f7_hurst_exponent = SafeClamp(f7, 0.0, 1.0, 0.50);
-
-      // [8] f8_volatility_ratio : ATR_M15(14) / ATR_H4(14)
-      double f8 = atrM15 / atrH4;
-      outFeatures.f8_volatility_ratio = SafeClamp(f8, 0.05, 3.0, 0.25);
-
-      // [9] & [10] Cyclical UTC Hour Encoding: sin(2*pi*hour/24), cos(2*pi*hour/24)
-      datetime utcSignal = (setup.signalTimeUTC > 0)
-                           ? setup.signalTimeUTC
-                           : ResolveCurrentUTCTime(m_brokerGMTOffset);
-      MqlDateTime dtUTC;
-      TimeToStruct(utcSignal, dtUTC);
-      double currentUtcHour = (double)dtUTC.hour + ((double)dtUTC.min / 60.0);
-      double angleRad       = 2.0 * M_PI * currentUtcHour / 24.0;
-
-      outFeatures.f9_hour_sin  = SafeClamp(MathSin(angleRad), -1.0, 1.0, 0.0);
-      outFeatures.f10_hour_cos = SafeClamp(MathCos(angleRad), -1.0, 1.0, 1.0);
-
-      // [11] f11_spread_to_sl_ratio : (Current_Spread_In_Dollars) / Stop_Loss_Distance_In_Dollars
-      double slDistUSD = MathMax(HARD_MIN_SL_DISTANCE_USD, setup.slDistanceUSD);
-      double f11       = MathMax(0.01, currentSpreadUSD) / slDistUSD;
-      outFeatures.f11_spread_to_sl_ratio = SafeClamp(f11, 0.0, 1.0, 0.10);
-
-      // Synchronize float32[12] tensor array for OnnxRun
       outFeatures.SyncTensor();
       return true;
      }

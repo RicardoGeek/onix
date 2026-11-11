@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Principal Quantitative Systems Engineering"
 #property link      "https://www.mql5.com"
-#property version   "4.32"
+#property version   "4.62"
 #property description "XAUUSD Institutional Liquidity Sweep + M1 Volume Profile + Native ONNX Meta-Labeling EA"
 #property description "Strict Single-Position Sniper Execution | 3.0% Daily / 6.0% Total Drawdown Hard Ceiling"
 #property strict
@@ -386,19 +386,16 @@ void OnTick()
    bool hasActiveExposure = g_executionManager.HasActiveExposure();
    g_sweepEngine.NotifyPendingOrderState(hasActiveExposure);
 
-   // Strict Operating Rule #3: One Position / Order at a Time
-   if(hasActiveExposure)
-     {
-      UpdateChartHUD();
-      return;
-     }
-
    // ================================================================
-   // PRIORITY 2: Layer 1 Deterministic 4-State Sweep + VP Engine
-   // Evaluated on M5 bar close with intrabar M1 Volume Profile.
+   // PRIORITY 2: Layer 1 Structural H1 Swing Breakout & Level Tracker
+   // Always called on every tick so broken H1 levels are marked even
+   // while a position is open (preventing stale post-exit re-entries).
    // ================================================================
    SSweepCandidateSetup candidateSetup;
-   if(!g_sweepEngine.EvaluateOnM5BarClose(false, candidateSetup))
+   bool hasCandidateSignal = g_sweepEngine.EvaluateOnM5BarClose(hasActiveExposure, candidateSetup);
+
+   // Strict Operating Rule #3: One Position / Order at a Time
+   if(!hasCandidateSignal || !g_executionManager.CanOpenNewPosition(candidateSetup.direction, candidateSetup.entryLimitPrice))
      {
       UpdateChartHUD();
       return;
@@ -467,7 +464,8 @@ void OnTick()
                                            candidateSetup.entryLimitPrice,
                                            candidateSetup.stopLossPrice,
                                            prediction.winProbability,
-                                           lotResult))
+                                           lotResult,
+                                           candidateSetup.confRiskMultiplier))
      {
       g_logger.Warn(StringFormat(
          "Setup #%I64u Rejected by PositionSizer: %s",
@@ -500,7 +498,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    if(g_executionManager.ConsumeClosedOutcome(closedDir, closedR))
       g_sweepEngine.NotifyTradeOutcome(closedDir, closedR, ResolveCurrentUTCTime(InpBrokerGMTOffsetHours));
   }
-
 
 //+------------------------------------------------------------------+
 //| Timer function: Non-Blocking Goldeen.io Telemetry Sync           |

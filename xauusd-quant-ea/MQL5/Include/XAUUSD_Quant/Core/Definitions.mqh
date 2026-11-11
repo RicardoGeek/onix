@@ -13,7 +13,7 @@
 //+------------------------------------------------------------------+
 //| Global System & Mathematical Constants                           |
 //+------------------------------------------------------------------+
-#define QUANT_EA_VERSION                 "4.32"
+#define QUANT_EA_VERSION                 "4.62"
 #define QUANT_DEFAULT_MAGIC              20260401
 #define QUANT_EPSILON                    1e-9
 #define ONNX_FEATURE_COUNT               12
@@ -25,38 +25,38 @@
 
 //--- Hard Non-Negotiable Drawdown & Ceiling Constants
 #define HARD_DAILY_DD_CEILING_PCT        3.00
-#define PROP_DAILY_DD_BREAKER_PCT        2.25
-#define GROWTH_DAILY_DD_BREAKER_PCT      2.40
+#define PROP_DAILY_DD_BREAKER_PCT        2.76
+#define GROWTH_DAILY_DD_BREAKER_PCT      2.76
 
 #define HARD_MAX_TOTAL_DD_CEILING_PCT    6.00
-#define PROP_TOTAL_DD_BREAKER_PCT        5.20
-#define GROWTH_TOTAL_DD_BREAKER_PCT      5.40
+#define PROP_TOTAL_DD_BREAKER_PCT        5.55
+#define GROWTH_TOTAL_DD_BREAKER_PCT      5.55
 
 //--- Sniper Stop-Loss Guardrails (in USD on XAUUSD, dynamically lot-scaled by PositionSizer)
 #define HARD_MIN_SL_DISTANCE_USD         1.20
-#define HARD_MAX_SL_DISTANCE_USD         10.50
+#define HARD_MAX_SL_DISTANCE_USD         45.00
 #define IDEAL_MIN_SL_DISTANCE_USD        1.50
-#define IDEAL_MAX_SL_DISTANCE_USD        3.50
+#define IDEAL_MAX_SL_DISTANCE_USD        25.00
 
 //--- ONNX Meta-Labeler Probability Thresholds
 #define ONNX_PROB_TIER2_MIN              0.58
 #define ONNX_PROB_TIER1_MIN              0.72
 
 //--- Mode A (Prop Guard) Risk Parameters
-#define PROP_TIER2_RISK_PCT              1.05
-#define PROP_TIER1_RISK_PCT              1.88
+#define PROP_TIER2_RISK_PCT              0.48
+#define PROP_TIER1_RISK_PCT              0.62
 #define PROP_HOUSE_MONEY_SHARE           0.25
-#define PROP_MAX_EFFECTIVE_RISK_PCT      1.98
+#define PROP_MAX_EFFECTIVE_RISK_PCT      1.85
 #define PROP_DD_DAMPENER_TRIGGER_PCT     2.00
 #define PROP_DD_DAMPENER_MULTIPLIER      0.60
-#define PROP_MAX_CONSECUTIVE_LOSSES      2
-#define PROP_DAILY_PROFIT_LOCK_PCT       5.20
+#define PROP_MAX_CONSECUTIVE_LOSSES      8
+#define PROP_DAILY_PROFIT_LOCK_PCT       15.00
 
 //--- Mode B (Asymmetric Growth) Risk Parameters
-#define GROWTH_TIER2_RISK_PCT            1.10
-#define GROWTH_TIER1_RISK_PCT            1.92
+#define GROWTH_TIER2_RISK_PCT            0.65
+#define GROWTH_TIER1_RISK_PCT            0.85
 #define GROWTH_HOUSE_MONEY_SHARE         0.40
-#define GROWTH_MAX_EFFECTIVE_RISK_PCT    2.15
+#define GROWTH_MAX_EFFECTIVE_RISK_PCT    1.25
 #define GROWTH_MAX_REMAINING_DD_CAP_PCT  2.15
 #define GROWTH_DD_DAMPENER_TRIGGER_PCT   2.50
 #define GROWTH_DD_DAMPENER_CLAMP_PCT     0.65
@@ -376,6 +376,14 @@ struct SSweepCandidateSetup
    double                valAtSignal;
    double                opposingLiquidityPrice;
    int                   expiryM5Bars;
+   int                   structuralTier;
+   int                   confluenceCount;
+   bool                  isPrimeSetup;
+   bool                  isStrongWave;
+   double                confRiskMultiplier;
+   double                sma34H1AtSignal;
+   double                sma80H1AtSignal;
+   double                closeH1Prev8AtSignal;
    bool                  isValid;
 
    void Reset()
@@ -409,6 +417,18 @@ struct SSweepCandidateSetup
       valAtSignal            = 0.0;
       opposingLiquidityPrice = 0.0;
       expiryM5Bars           = 3;
+      structuralTier         = 0;
+      confluenceCount        = 1;
+      isPrimeSetup           = true;
+      isStrongWave           = false;
+      isStrongWave           = false;
+      isStrongWave           = false;
+      isStrongWave           = false;
+      isStrongWave           = false;
+      confRiskMultiplier     = 1.0;
+      sma34H1AtSignal        = 0.0;
+      sma80H1AtSignal        = 0.0;
+      closeH1Prev8AtSignal   = 0.0;
       isValid                = false;
      }
   };

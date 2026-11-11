@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>7Wave blind replay</title>
+<style>
+  :root { --bg:#000; --panel:#101317; --line:#262b31; --text:#e6e6e6; --dim:#97a0aa; --up:#00bfff; --down:#ff00ff;
+          --good:#3ddc84; --bad:#ff5a5a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 6px 0 0; font-weight:650; }
+  .badge { padding:3px 9px; border-radius:6px; background:var(--panel); border:1px solid var(--line); font-weight:600; white-space:nowrap; }
+  .badge.up { color:var(--up); } .badge.down { color:var(--down); }
+  .spacer { flex:1; }
+  .dim { color:var(--dim); }
+  #chartWrap { position:relative; height:62vh; min-height:300px; }
+  #chart { display:block; width:100%; height:100%; }
+  #doneMsg { position:absolute; inset:0; display:none; align-items:center; justify-content:center; text-align:center; font-size:18px; }
+  .bar { display:flex; gap:10px; align-items:center; padding:10px 14px; border-top:1px solid var(--line); flex-wrap:wrap; }
+  button { font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 14px; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:#5b636d; }
+  button:disabled { opacity:.35; cursor:default; }
+  button.choice { min-width:150px; font-weight:650; font-size:15px; padding:11px 16px; }
+  button.skip { border-color:#4a4f56; }
+  button.take { border-color:#2e7d4f; }
+  button.strong { border-color:#3ddc84; background:#0e2618; }
+  button.zoom.active { border-color:#cfd6dd; color:#fff; }
+  .kbd { display:inline-block; border:1px solid #555; border-radius:4px; padding:0 5px; font-size:12px; color:var(--dim); margin-right:7px; font-weight:500; }
+  #reveal { display:none; padding:10px 14px; border-top:1px solid var(--line); }
+  #verdict { font-size:16px; font-weight:700; }
+  .good { color:var(--good); } .bad { color:var(--bad); }
+  #score { padding:10px 14px; border-top:1px solid var(--line); overflow-x:auto; }
+  table { border-collapse:collapse; }
+  td, th { padding:3px 12px; text-align:right; white-space:nowrap; }
+  th:first-child, td:first-child { text-align:left; }
+  th { color:var(--dim); font-weight:500; }
+  footer { padding:12px 14px 32px; border-top:1px solid var(--line); color:var(--dim); }
+  footer p { margin:6px 0; max-width:980px; }
+  footer .actions { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>7Wave blind replay</h1>
+  <span id="progress" class="badge"></span>
+  <span id="tf" class="badge"></span>
+  <span id="sig" class="badge"></span>
+  <span id="when" class="badge" title="Server time of the signal bar, as MT5 labels it"></span>
+  <span class="spacer"></span>
+  <span class="dim">Bars shown</span>
+  <button class="zoom" data-z="80">80</button>
+  <button class="zoom" data-z="160">160</button>
+  <button class="zoom" data-z="320">320</button>
+</header>
+
+<div id="chartWrap">
+  <canvas id="chart"></canvas>
+  <div id="doneMsg"><div>All signals are decided.<br><span class="dim">Download your results below.</span></div></div>
+</div>
+
+<div class="bar" id="decide">
+  <span class="dim" style="flex-basis:100%">Take it? Entry at the next bar's open, stop 1.5 ATR away (the ruler is 1 ATR). Click the chart once to use the keys.</span>
+  <button class="choice skip" data-d="0"><span class="kbd">1</span>Skip</button>
+  <button class="choice take" data-d="1"><span class="kbd">2</span>Take</button>
+  <button class="choice strong" data-d="2"><span class="kbd">3</span>Strong take</button>
+</div>
+
+<div id="reveal">
+  <div id="verdict"></div>
+  <div id="details" class="dim"></div>
+  <div style="margin-top:8px"><button id="next"><span class="kbd">Space</span>Next signal</button></div>
+</div>
+
+<div id="score"></div>
+
+<footer>
+  <p><b>How it works.</b> Every signal is a real 7Wave star or arrow, on gold H1 or M15, 2018-2026, picked at random.
+     You see the chart only up to the bar where the signal appeared. The date and the price are hidden, so memory
+     can't help. Decide the way you would live, from what is on the screen.</p>
+  <p><b>After you decide</b> the future is shown. The shaded area is what came next. The dashed lines are the entry,
+     the -1R stop (1.5 ATR) and the +3R target. You also see how far the move ran and what the whale exit (holding)
+     would have made. Your answer can't be changed after the reveal.</p>
+  <p><b>Saving.</b> Decisions are saved in this browser as you go, so you can stop and come back any time. 100
+     decisions give a first read, and 300 or more give a reliable one. When you're done, download the results and send
+     the file to Claude.</p>
+  <div class="actions">
+    <button id="export">Download results (CSV)</button>
+    <button id="reset">Start over</button>
+  </div>
+</footer>
+
+<script>
+const PACK = __PACK__;
+const SIGS = PACK.signals;
+const BY_ID = new Map(SIGS.map(s => [s.id, s]));
+const STORE = "7wave_trainer_v1";
+const PERIODS = [20, 40, 60, 80, 100, 120, 140];
+const EMA_COLORS = ["rgb(220,0,0)", "rgb(255,60,60)", "rgb(255,130,100)", "rgb(255,255,0)",
+                    "rgb(150,240,100)", "rgb(40,200,40)", "rgb(0,140,0)"];
+const LIME = "rgb(0,255,0)", UP = "rgb(0,191,255)", DOWN = "rgb(255,0,255)";
+const NAMES = ["Skip", "Take", "Strong take"];
+const $ = id => document.getElementById(id);
+
+let state = loadState();
+let cur = null, revealed = false, shownAt = 0;
+
+function loadState() {
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE));
+    if (s && s.decisions) return s;
+  } catch (e) { /* fall through */ }
+  return { decisions: {}, zoom: 160 };
+}
+function saveState() { localStorage.setItem(STORE, JSON.stringify(state)); }
+
+// Rebuild prices (cents relative to the signal close) and the 7 EMAs, seeded with the indicator's values.
+function decode(s) {
+  const n = s.c.length, C = new Array(n), O = new Array(n), H = new Array(n), L = new Array(n);
+  let acc = 0;
+  for (let k = 0; k < n; k++) { acc += s.c[k]; C[k] = acc; O[k] = acc + s.o[k]; H[k] = acc + s.h[k]; L[k] = acc + s.l[k]; }
+  const E = PERIODS.map((p, j) => {
+    const a = 2 / (p + 1), out = new Array(n);
+    let prev = s.e0[j];
+    for (let k = 0; k < n; k++) { prev = C[k] * a + prev * (1 - a); out[k] = prev; }
+    return out;
+  });
+  return Object.assign({}, s, { n, C, O, H, L, E });
+}
+
+function nextUndecided() {
+  for (const s of SIGS) if (!state.decisions[s.id]) return s;
+  return null;
+}
+
+function showNext() {
+  const s = nextUndecided();
+  revealed = false;
+  $("reveal").style.display = "none";
+  if (!s) {
+    cur = null;
+    $("doneMsg").style.display = "flex";
+    $("decide").style.display = "none";
+    setHeader();
+    draw();
+    renderScore();
+    return;
+  }
+  cur = decode(s);
+  shownAt = performance.now();
+  $("doneMsg").style.display = "none";
+  $("decide").style.display = "flex";
+  document.querySelectorAll("button.choice").forEach(b => b.disabled = false);
+  setHeader();
+  draw();
+  renderScore();
+}
+
+function setHeader() {
+  const done = Object.keys(state.decisions).length;
+  $("progress").textContent = `${done} of ${SIGS.length} decided`;
+  if (!cur) { $("tf").textContent = ""; $("sig").textContent = ""; $("when").textContent = ""; return; }
+  $("tf").textContent = cur.tf;
+  $("sig").textContent = `${cur.kind === "star" ? "Star" : "Arrow"} ${cur.dir > 0 ? "UP" : "DOWN"}`;
+  $("sig").className = "badge " + (cur.dir > 0 ? "up" : "down");
+  $("when").textContent = `${cur.wd} ${cur.hm}`;
+  document.querySelectorAll("button.zoom").forEach(b => b.classList.toggle("active", +b.dataset.z === state.zoom));
+}
+
+function decide(d) {
+  if (!cur || revealed) return;
+  const secs = (performance.now() - shownAt) / 1000;
+  if (secs < 0.6) return;  // a key pressed together with "next" is not a look at the chart
+  state.decisions[cur.id] = { d, secs: Math.round(secs * 10) / 10, zoom: state.zoom, at: new Date().toISOString() };
+  saveState();
+  revealed = true;
+  document.querySelectorAll("button.choice").forEach(b => b.disabled = true);
+  showReveal(d);
+  setHeader();
+  draw();
+  renderScore();
+}
+
+const fmtR = v => (v >= 0 ? "+" : "") + v.toFixed(2) + "R";
+
+function showReveal(d) {
+  const r = cur.res;
+  let text, cls;
+  if (r.good) { text = "Good wave: +3R came before the stop."; cls = "good"; }
+  else if (r.fake) { text = "Fake: stopped out before reaching +1R."; cls = "bad"; }
+  else if (r.why === -1) { text = `Stopped out after reaching +${r.mfe.toFixed(1)}R.`; cls = "bad"; }
+  else { text = `Time exit at ${fmtR(r.R)}.`; cls = r.R > 0 ? "good" : "bad"; }
+  $("verdict").innerHTML = `You said <b>${NAMES[d]}</b>. <span class="${cls}">${text}</span>`;
+  $("details").textContent =
+    `Bracket ${fmtR(r.R)} after costs · the move ran ${r.run.toFixed(1)}R before the -1R stop · ` +
+    `holding (whale exit) ${fmtR(r.hold)} · ${r.date} server time · price ${r.px.toFixed(2)}`;
+  $("reveal").style.display = "block";
+}
+
+// ---------------------------------------------------------------------------------------------- chart
+function drawArrow(g, cx, cy, d, color) {
+  const s = d > 0 ? 1 : -1;  // 1: pointing up
+  g.fillStyle = color;
+  g.beginPath();
+  g.moveTo(cx, cy - 8 * s);
+  g.lineTo(cx + 7, cy - 1 * s);
+  g.lineTo(cx + 2.8, cy - 1 * s);
+  g.lineTo(cx + 2.8, cy + 8 * s);
+  g.lineTo(cx - 2.8, cy + 8 * s);
+  g.lineTo(cx - 2.8, cy - 1 * s);
+  g.lineTo(cx - 7, cy - 1 * s);
+  g.closePath();
+  g.fill();
+}
+
+function drawStar(g, cx, cy, color) {
+  g.fillStyle = color;
+  g.beginPath();
+  for (let p = 0; p < 10; p++) {
+    const r = p % 2 === 0 ? 8 : 3.4, a = -Math.PI / 2 + p * Math.PI / 5;
+    const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+    if (p === 0) g.moveTo(x, y); else g.lineTo(x, y);
+  }
+  g.closePath();
+  g.fill();
+}
+
+function draw() {
+  const cv = $("chart"), dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, Hh = cv.clientHeight;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(Hh * dpr)) {
+    cv.width = Math.round(W * dpr); cv.height = Math.round(Hh * dpr);
+  }
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = "#000";
+  g.fillRect(0, 0, W, Hh);
+  if (!cur) return;
+
+  const dk = cur.nctx - 1;                       // the decision bar
+  const last = revealed ? cur.n - 1 : dk;
+  const first = Math.max(0, dk - state.zoom + 1);
+  const count = last - first + 1;
+  const plotW = Math.max(120, W - 78);           // right margin: labels and the ATR ruler
+  const step = plotW / count;
+  const X = k => (k - first + 0.5) * step;
+  const stop = cur.entry - cur.dir * cur.rd, target = cur.entry + cur.dir * 3 * cur.rd;
+
+  let lo = Infinity, hi = -Infinity;
+  for (let k = first; k <= last; k++) {
+    lo = Math.min(lo, cur.L[k]); hi = Math.max(hi, cur.H[k]);
+    for (const e of cur.E) { lo = Math.min(lo, e[k]); hi = Math.max(hi, e[k]); }
+  }
+  if (revealed) { lo = Math.min(lo, stop, target); hi = Math.max(hi, stop, target); }
+  const span = Math.max(hi - lo, 1);
+  lo -= span * 0.08; hi += span * 0.08;
+  const top = 12, bot = Hh - 12;
+  const Y = v => top + (hi - v) / (hi - lo) * (bot - top);
+
+  // dotted grid, like MT5 (no price or date labels)
+  g.save();
+  g.strokeStyle = "rgb(119,136,153)"; g.globalAlpha = 0.45; g.lineWidth = 1; g.setLineDash([1, 3]);
+  for (let i = 1; i < 6; i++) { const y = Math.round(top + i * (bot - top) / 6) + 0.5; g.beginPath(); g.moveTo(0, y); g.lineTo(plotW, y); g.stroke(); }
+  for (let i = 1; i < 10; i++) { const x = Math.round(i * plotW / 10) + 0.5; g.beginPath(); g.moveTo(x, top); g.lineTo(x, bot); g.stroke(); }
+  g.restore();
+
+  if (revealed) {
+    const xf = X(dk) + step / 2;
+    g.fillStyle = "rgba(60,95,150,0.18)";
+    g.fillRect(xf, 0, plotW - xf, Hh);
+  }
+
+  // the 7 EMAs
+  g.lineWidth = 1;
+  cur.E.forEach((e, j) => {
+    g.strokeStyle = EMA_COLORS[j];
+    g.beginPath();
+    for (let k = first; k <= last; k++) { const x = X(k), y = Y(e[k]); if (k === first) g.moveTo(x, y); else g.lineTo(x, y); }
+    g.stroke();
+  });
+
+  // candles: lime outline and wick, hollow black bullish body, white bearish body
+  const bw = Math.min(step * 0.7, 13);
+  for (let k = first; k <= last; k++) {
+    const x = Math.round(X(k)) + 0.5, o = cur.O[k], c = cur.C[k];
+    g.strokeStyle = LIME; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x, Y(cur.H[k])); g.lineTo(x, Y(cur.L[k])); g.stroke();
+    if (bw >= 3) {
+      const yo = Y(o), yc = Y(c), y1 = Math.round(Math.min(yo, yc)) + 0.5, h = Math.max(1, Math.round(Math.abs(yc - yo)));
+      const x1 = Math.round(X(k) - bw / 2) + 0.5, w = Math.max(2, Math.round(bw) - 1);
+      g.fillStyle = c > o ? "#000" : (c < o ? "#fff" : LIME);
+      g.fillRect(x1, y1, w, h);
+      g.strokeRect(x1, y1, w, h);
+    }
+  }
+
+  // the decision bar
+  g.save();
+  g.strokeStyle = "rgba(255,255,255,0.35)"; g.setLineDash([4, 4]);
+  g.beginPath(); g.moveTo(Math.round(X(dk)) + 0.5, 0); g.lineTo(Math.round(X(dk)) + 0.5, Hh); g.stroke();
+  g.restore();
+
+  // stars and arrows at EMA 140 (UP below the line, DOWN above), as the indicator draws them
+  const mlast = revealed ? last : dk;
+  for (const [k, isStar, d] of cur.mk) {
+    if (k < first || k > mlast) continue;
+    const x = X(k), ye = Y(cur.E[6][k]), color = d > 0 ? UP : DOWN;
+    if (isStar) drawStar(g, x, ye + d * 30, color);
+    else drawArrow(g, x, ye + d * 17, d, color);
+  }
+
+  // the reveal: entry, stop, target and where the bracket ended
+  if (revealed) {
+    const xs = X(dk) + step / 2;
+    const hline = (v, color, label) => {
+      const y = Math.round(Y(v)) + 0.5;
+      g.save(); g.strokeStyle = color; g.setLineDash([6, 4]);
+      g.beginPath(); g.moveTo(xs, y); g.lineTo(plotW, y); g.stroke(); g.restore();
+      g.fillStyle = color; g.font = "12px system-ui, sans-serif"; g.fillText(label, plotW + 6, y + 4);
+    };
+    hline(cur.entry, "rgba(255,255,255,0.85)", "entry");
+    hline(stop, "rgb(255,90,90)", "-1R");
+    hline(target, "rgb(61,220,132)", "+3R");
+    const r = cur.res;
+    const px = r.why === 1 ? target : (r.why === -1 ? stop : cur.C[Math.min(cur.xk, cur.n - 1)]);
+    g.strokeStyle = r.R > 0 ? "rgb(61,220,132)" : "rgb(255,90,90)"; g.lineWidth = 2;
+    g.beginPath(); g.arc(X(Math.min(cur.xk, cur.n - 1)), Y(px), 7, 0, 2 * Math.PI); g.stroke();
+    g.lineWidth = 1;
+  }
+
+  // 1 ATR ruler on the right (the stop is 1.5 of these)
+  const atr = cur.rd / 1.5, mid = (lo + hi) / 2;
+  const ya = Y(mid + atr / 2), yb = Y(mid - atr / 2), xr = plotW + 46;
+  g.strokeStyle = "rgba(255,255,255,0.75)"; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(xr, ya); g.lineTo(xr, yb); g.moveTo(xr - 5, ya); g.lineTo(xr + 5, ya); g.moveTo(xr - 5, yb); g.lineTo(xr + 5, yb); g.stroke();
+  g.lineWidth = 1;
+  g.fillStyle = "rgba(255,255,255,0.75)"; g.font = "11px system-ui, sans-serif";
+  g.fillText("1 ATR", xr - 14, yb + 14);
+}
+
+// ---------------------------------------------------------------------------------------------- score
+function stats(list) {
+  if (!list.length) return null;
+  const n = list.length, sum = f => list.reduce((a, s) => a + f(s), 0);
+  return { n, good: sum(s => s.res.good) / n, fake: sum(s => s.res.fake) / n, R: sum(s => s.res.R) / n, hold: sum(s => s.res.hold) / n };
+}
+
+function renderScore() {
+  const dec = Object.entries(state.decisions).map(([id, v]) => ({ s: BY_ID.get(+id), d: v.d })).filter(x => x.s);
+  if (!dec.length) { $("score").innerHTML = '<span class="dim">Your scoreboard appears after the first decision.</span>'; return; }
+  const rows = [
+    ["Everything shown", dec.map(x => x.s)],
+    ["Your takes (Take + Strong)", dec.filter(x => x.d >= 1).map(x => x.s)],
+    ["Strong takes only", dec.filter(x => x.d === 2).map(x => x.s)],
+    ["Your skips", dec.filter(x => x.d === 0).map(x => x.s)],
+  ];
+  const pct = v => (100 * v).toFixed(0) + "%";
+  let html = "<table><tr><th></th><th>Signals</th><th>Good waves</th><th>Fakes</th><th>Avg R (bracket)</th><th>Avg R (holding)</th></tr>";
+  for (const [label, list] of rows) {
+    const st = stats(list);
+    html += st ? `<tr><td>${label}</td><td>${st.n}</td><td>${pct(st.good)}</td><td>${pct(st.fake)}</td><td>${fmtR(st.R)}</td><td>${fmtR(st.hold)}</td></tr>`
+               : `<tr><td>${label}</td><td>0</td><td></td><td></td><td></td><td></td></tr>`;
+  }
+  html += "</table>";
+  $("score").innerHTML = html;
+}
+
+// ---------------------------------------------------------------------------------------------- export / reset
+function exportCsv() {
+  const head = ["id", "tf", "kind", "dir", "decision", "decision_name", "secs", "zoom", "decided_at",
+                "good", "fake", "R", "run_R", "hold_R", "date", "year", "price"];
+  const lines = [head.join(",")];
+  for (const s of SIGS) {
+    const v = state.decisions[s.id];
+    if (!v) continue;
+    const r = s.res;
+    lines.push([s.id, s.tf, s.kind, s.dir, v.d, NAMES[v.d], v.secs, v.zoom, v.at,
+                r.good, r.fake, r.R, r.run, r.hold, r.date, r.year, r.px].join(","));
+  }
+  const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `7wave_trainer_results_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+$("export").onclick = exportCsv;
+$("reset").onclick = () => {
+  if (confirm("Delete all your decisions in this browser and start over?")) { state = { decisions: {}, zoom: state.zoom }; saveState(); showNext(); }
+};
+$("next").onclick = () => showNext();
+document.querySelectorAll("button.choice").forEach(b => b.onclick = () => decide(+b.dataset.d));
+document.querySelectorAll("button.zoom").forEach(b => b.onclick = () => { state.zoom = +b.dataset.z; saveState(); setHeader(); draw(); });
+document.addEventListener("keydown", e => {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  if (e.key === "1") decide(0);
+  else if (e.key === "2") decide(1);
+  else if (e.key === "3") decide(2);
+  else if ((e.key === " " || e.key === "Enter") && revealed) { e.preventDefault(); showNext(); }
+});
+window.addEventListener("resize", draw);
+showNext();
+</script>
+</body>
+</html>

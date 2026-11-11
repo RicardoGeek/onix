@@ -18,6 +18,13 @@ This document contains the complete system context, Windows VM paths, architectu
   - `c:\Users\faker\Documents\dev\onix\usdjpy-moonshot-ea` (`usdjpy_chrysalis_ea`, `CHANGELOG.md`)
   - `c:\Users\faker\Documents\dev\onix\btcusd-moonshot-ea` (`btcusd_chrysalis_ea`, `CHANGELOG.md`)
   - `c:\Users\faker\Documents\dev\onix\aegis-regime-hunter-ea` (`aegis_regime_hunter_ea`, `CHANGELOG.md`)
+  - `c:\Users\faker\Documents\dev\onix\xauusd-sevenwave-ea` (`XAUUSD_SevenWave`, `CHANGELOG.md`, `REPORT.md`; binaries in `bin/XAUUSD_SevenWave/`)
+  - `c:\Users\faker\Documents\dev\onix\7wave` (`7Wave` indicator in `MQL5/Indicators/7Wave/`, `7Wave_EA` in `MQL5/Experts/7Wave/`, `RULES.md`, `CHANGELOG.md`; binaries in `bin/7Wave/`).
+    This is the user's own manual strategy, built in steps the user checks: indicator, then an EA that follows it, then a small risk engine.
+    It is not the AI-designed `xauusd-sevenwave-ea`, so don't import its logic. `RULES.md` is the spec.
+  - `c:\Users\faker\Documents\dev\onix\16runes-ea` (`16Runes`, `CHANGELOG.md`, `REPORT.md`; binaries in `bin/16Runes/`, embedded ONNX `MQL5/Files/models/16runes_meta.onnx`, research & parity tools in `python_pipeline/`).
+  - `c:\Users\faker\Documents\dev\onix\oliver-kell-ea` (`oliver_kell_ea`, `CHANGELOG.md`, `REPORT.md`; binaries in `bin/oliver_kell_ea/`, embedded ONNX `MQL5/Files/models/oliver_kell_meta.onnx`, research & parity tools in `python_pipeline/`).
+  - `c:\Users\faker\Documents\dev\onix\trident-moe-ea` (`XAUUSD_Trident_MoE`, `CHANGELOG.md`, `README.md`; binaries in `bin/XAUUSD_Trident_MoE/`, 3 embedded Strict-OOS ONNX models `xauusd_meta_model.onnx`, `16runes_meta.onnx`, `impulse_cascade_meta.onnx`).
 - **External Artifacts & Telemetry Archive (Non-Repo)**: `C:\Users\faker\Documents\onix_artifacts`
   - `C:\Users\faker\Documents\onix_artifacts\reports\` — Strategy Tester HTML reports (`pass_2024_10k.htm`, `pass_2024_50k.htm`, `pass2a_prop.htm`, `pass2b_growth.htm`) & run journals
   - `C:\Users\faker\Documents\onix_artifacts\ini\` — Automated Strategy Tester `.ini` configurations (`tester_2024_10k.ini`, `tester_2024_50k.ini`, `tester_pass2a_prop.ini`, `tester_pass2b_growth.ini`, `tester_collect.ini`, `tester_collect_2024.ini`)
@@ -74,6 +81,8 @@ This document contains the complete system context, Windows VM paths, architectu
      1. Archive the compiled `.ex5` binary in `c:\Users\faker\Documents\dev\onix\bin\<EA_Folder>\<EA_Name>_v<X.YY>.ex5` so any historical version can be restored at any time.
      2. Deploy `<EA_Name>_v<X.YY>.ex5` (and sync `<EA_Name>.ex5`) to `MQL5\Experts\` across **every** MT5 terminal (`Pepperstone`, `Upcomers`, `GetLeveraged`, `BreakFree`, `MT5 Tests`) and **remove any older versioned `<EA_Name>_v*.ex5` files** from every terminal's `MQL5\Experts\` folder so only the latest versioned binary is present.
      3. Add a new version section (`## [vX.YY] ? YYYY-MM-DD`) at the top of that EA's root `CHANGELOG.md` explaining the architectural and parameter changes.
+   - **Exception: 7Wave** (`7wave/`, indicator and later its EA) is installed in the **Pepperstone terminal only** (user decision, 2026-11-06).
+     The indicator keeps one unversioned copy there (`MQL5\Indicators\7Wave\7Wave.ex5`); its version shows in the indicator name on the chart.
 
 ---
 
@@ -212,6 +221,167 @@ This document contains the complete system context, Windows VM paths, architectu
          - $S_{\text{freq}} = 25 \times \frac{\text{TradesPerTradingDay}}{\text{TradesPerTradingDay} + 0.15}$
          - $S_{\text{wait}} = 25 \times \frac{4.0}{\text{WaitTradingDays} + 4.0}$
        - Always state the score and delta vs. the previous version (e.g., `67.0 / +0.2`).
+
+---
+
+### Lesson 17: 10-Year (`2017–2026`) Out-of-Sample Validation & `XAUUSD_Sniper_ONNX v4.40` Unbroken H1 Swing Engine
+- **Validation Harness (`C:\Users\faker\Documents\goldie_research\sniper\`)**:
+  - `sniper_runs.ps1` runs 5 isolated MT5 backtest windows across 10 years (`duka_2017_2019`, `duka_2020_2021`, `duka_2022_2023` on `XAUUSD_D` Dukascopy M1 `Model=0`; `real_2024` on `XAUUSD_REAL` `Model=4`; `live_2025_2026` on `XAUUSD` `Model=4`).
+  - `compare_runs.py` parses deal-level `$/0.01 lot`, win rate, median R, and per-year statistics; `oos_filter_test.py` tests cross-year out-of-sample ONNX probability filtering.
+- **`XAUUSD_Sniper_ONNX v4.40` Architecture (`SweepSignalEngine.mqh`, `ExecutionManager.mqh`, `PositionSizer.mqh`)**:
+  - Replaced the in-sample overfitted M5 sweep + ONNX memorizer (`v4.31/v4.32`) with a scale-invariant **6-Tier Unbroken H1 Structural Swing Breakout (`28/13, 26/13, 22/11, 18/9, 15/7, 12/6`) + `-0.045%` Pre-Level Offset + Velocity/Climax Filter (`vel60m <= 2.10 && !(vel15m > 2.38 && vel60m > 1.48) && !(t_used >= 3 && trend34 > 3.80)`) + 6-Stage Completed-M1-Bar Positive R-Ratchet (`+0.10R` to `+0.85R`, `SL = -0.435%`, `TP2 = +0.580%`)**.
+  - Verified profitable across **all 10 individual years (`2017–2026`)**: `1,447` trades, `84.0%` WR, `+92.8R` (`t = +4.34`), with unseen `2026 H2` (`83.8%` WR, `+0.70 $/0.01`) outperforming seen `2026 H1` (`80.0%` WR, `+0.53 $/0.01`).
+  - **On-Hold Next-Step Levers for Higher Unseen Return**: (1) Failed-breakout time-decay cut (`-0.45R` after `20–30m` instead of `-1.00R`), (2) `50%` ratchet + `50%` structural wave runner, (3) Confluence-weighted risk sizing (`conf >= 3`), (4) Dual-engine regime coverage (Breakout + Climax Sweep Fade).
+
+### Lesson 18: `XAUUSD_SevenWave v1.00`: 7-EMA Hierarchy x Liquidity-Pool Breakouts (new design, 2026-11-03)
+- **Directory**: `c:\Users\faker\Documents\dev\onix\xauusd-sevenwave-ea` (`MQL5/Experts/XAUUSD_SevenWave.mq5`, includes in
+  `MQL5/Include/SevenWave/`, `#resource "\\Files\\models\\sevenwave_rater.onnx"`, research in `python_pipeline/`, data caches in
+  `C:\Users\faker\Documents\goldie_research\sevenwave\`).
+- **Research verdict (10y, hostile costs)**: raw M15 7-EMA alignment timing has no edge in any variant. The edge comes from stop entries at
+  aged, unbroken H1/H2 fractal swing pools, gated by H4(+D1) 7-EMA stacks: +0.14..+0.39R per trade, positive in 7-9/10 years. The same pools
+  without the gate have ~0 edge.
+- **Invariants**: H4 is rebuilt from H1 anchored to the 17:00-NY close, H2 from H1 on even UTC hours, D1 from broker daily bars. The broker clock is
+  learned from the daily-break hour (`Clock.mqh`). The AI uses 17 features `float32[1,17]` and works as a veto only (threshold `AiModelMeta.mqh`).
+  The tester supplies only ~1 year of warm-up history before the start date.
+- **Parity tool**: `python_pipeline/sw_parity.py <events.csv>` compares the EA's tester event log with the Python replay (target: >95% of
+  triggers matched, AI correlation >0.98).
+- **v1.10 (2026-11-04)**: geometric ribbon 10/16/26/41/66/105/168, streams A/B/G/P, 2/3 concurrent positions, portfolio budget with a
+  room fraction of 15% for Prop (Kelly-safe near a trailing floor; 40-50% froze the account) and 50% for Growth, Prop daily consistency lock
+  at 80% of the daily limit. Judge with `python_pipeline/sw_tradelog.py <sevenwave_trades.csv>`; deal-based parsers break with
+  concurrent positions. Always validate streams with a TIME-ORDERED portfolio replay: independent-outcome averages overstate
+  clustered signals (M15 fresh-wave: +0.18R independent, ~0R in a portfolio).
+- **v1.20 (2026-11-04)**: whale pyramid, Growth only.
+  - Rule: when a position first reaches +1.5R, add one unit of the same size. The add's stop sits at the first entry, its target
+    is the probe's 3R target, and the probe is secured at BE+0.05R first.
+  - Adds don't use a slot but do use the never-breach budget. They are tagged `<stream>+` and re-linked after a restart.
+  - Prop never pyramids: it froze the 6% trailing account in the research replay.
+  - Verified in MT5: Growth $1k +461% / +455% vs v1.10 +335% / +254% (2018-23 / 2024-26). Parity: add stop = 1.50R median.
+  - Rejected ideas live in REPORT.md "Ideas tested after v1.10" (retest scalps, early entries, ribbon-calculus whale trigger
+    incl. its ATR+EMA200 "fix"). Don't re-test them.
+- **v1.30/v1.31 (2026-11-04)**: whale handling.
+  - Rule: at +1.5R a trade is secured at BE+0.05R, aims for 5R, may run 72h and trails 3 ATR(H1), in both modes; Growth also adds.
+  - Trade management (letting verified winners run) produced the biggest honest gains of the project.
+  - Research round 2 (web papers, MQL5 CodeBase, Kronos, a 31-feature walk-forward AI) is logged in REPORT.md.
+    Entry prediction stayed at AUC ~0.5.
+  - The "overfit" Sniper v4.31 numbers come from an in-sample ONNX: W/L 1.05 at 86.6% WR. Its honest v4.40 rebuild makes
+    +0.064R per trade.
+- **v1.32 (2026-11-04)**: optional `InpSkipNewsDays` (default off) skips new trades on key US release days.
+  - It gives smoother results with lower drawdown, but gives up 2024-26 return.
+  - The calendar comes from `MQL5/Scripts/SW_CalendarExport.mq5` (run via a terminal `[StartUp] Script=... ShutdownTerminal=1` ini).
+    `python_pipeline/sw_newsdays.py` regenerates `NewsDays.mqh` / `NfpTable.mqh`.
+- **Calendar trap**: MQL5 economic-calendar times (`MqlCalendarValue.time`) are **UTC**, not broker server time.
+  - Verified: the M1 range is 15x normal at the raw NFP minute.
+  - Converting them as server time shifted releases 2-3h early and produced a fake +0.40R NFP edge (look-ahead).
+- **Tester trap**: `.ini [TesterInputs]` only overrides the inputs it lists; unlisted inputs keep the previous run's values. Always pass every input.
+- **v1.33 (2026-11-04)**: the AI veto is off (`SW_AI_VETO false`), and Growth bets at most 25% of the trailing room (`SW_GROWTH_TOT_FRAC 0.25`).
+  - **In-sample trap**: the shipped ONNX rater was trained on 2017-2023. So every 2018-2023 MT5 run of v1.10-v1.32 was partly in-sample.
+    On unseen 2024-26 its vetoed setups beat the traded ones (+0.43R vs +0.29R). Check `SW_AI_TRAIN_STAMP` before trusting any
+    MT5 window that overlaps the training years.
+  - **Freeze trap**: a Growth share of 0.5 froze the honest 2018-23 account at its 30% floor in Aug 2022 (min lot no longer fitted).
+    Shares above ~0.25 over-bet the room near a floor.
+  - **Honest MT5 results at the defaults**: Prop $50k +28.9% (2018-23) / +48.2% (2024-26); Growth $10k +$53,812 / +$280,058.
+  - **Risk frontier, Growth $10k 2024-26:** 2% / 15% / 50% gives +$3.19M; 3% / 20% / 60% gives +$7.4M with a 0.5 share, but its equity
+    DD reached 59.4% of a 60% limit in 2018-23. Pepperstone caps one XAUUSD order at 50 lots.
+- **Outside data (round 4, `sw_study46-52`)**: none of it helps as a filter or a signal. That covers CFTC COT, Geopolitical Risk, EPU,
+  CBOE GVZ/VIX, Treasury real yields, GDELT news tone, strategy momentum, failed-breakout exits, the Asia night effect and Baur's
+  autumn effect.
+  - Parse outside data with `python_pipeline/sw_outside.py` (conservative publication times).
+  - FRED blocks this VM, and SPDR no longer serves GLD holdings history.
+
+### Lesson 19: 7Wave signals are coin-flip waves at the signal (scorecard, 2026-11-06)
+- **What it covers**: every 7Wave v1.20 star and arrow on XAUUSD H1 and M15, 2018-2026, hostile costs.
+  - Code: `7wave/research/wave_scorecard.py`. Report: `7wave/research/SCORECARD.md`.
+- **Wave sizes**: after a signal, gold runs 3R / 5R / 10R before -1R about as often as a random walk.
+  - H1: 22% / 14% / 6%. M15: 22% / 15% / 9%. Random walk: 25% / 17% / 9%.
+- **Taking everything loses**: -0.20R per signal with a 3R/1R bracket, -0.11 to -0.16R with whale holding.
+- **No separator at the signal**: no context visible at the signal holds across seen/unseen years.
+  - H4/H1 ribbon agreement flips between 2018-21 and 2022-26.
+  - Walk-forward LightGBM: AUC 0.503 (H1), 0.519 (M15).
+  - Only small consistent effects: H1 volatility expansion (ATR14/ATR100 > ~1.12, 8 of 9 years); M15 signals in the
+    17-22 UTC evening are worst (8 of 9 years).
+- **Rules**: the Python rules in `7wave/tools/wave_rules.py` are the ones the user checked on the chart; reuse them.
+  Don't spend GPU on predicting these signals from chart context.
+- **Blind-replay trainer** (tests whether the user's eye beats chance at the signal):
+  - `7wave/trainer/build_trainer.py` writes `7wave_trainer.html`: 400 random signals, future/date/price hidden,
+    seed 2026. The page is generated and gitignored. The answer key is `goldie_research\7wave\trainer_pack.csv`.
+  - In the app, run it via `.claude/launch.json`, preview `7wave-trainer` (http://localhost:8765). The browser pane
+    refuses `file://` pages that were not written by Claude directly.
+  - `7wave/trainer/score_trainer.py <export.csv>` scores the user's export: takes vs skips and an eye AUC with 95%
+    bootstrap intervals.
+  - **Round 1 result** (400 decisions, 2026-11-06, `7wave/research/TRAINER_RESULTS.md`): eye AUC 0.479 (0.418-0.540),
+    coin flip like the AI. Strong takes were the worst group (-0.40R). The second half looked better (AUC 0.522), but
+    that is unproven.
+- **Gate test** (`7wave/research/gate_test.py`, `GATE_TEST.md`): the 7Wave ribbon works as the TREND FILTER for the
+  SevenWave stream-A entry. That entry is a stop order 0.15 ATR before an unbroken H1 fractal pool aged 12-48 bars,
+  with growth management.
+  - All 7 lines stacked on H4 + D1 give +0.255R per trade on Dukascopy 2017-26: +0.249 seen, +0.262 unseen,
+    8 of 10 years green.
+  - Pepperstone 2023-26: +0.315R.
+  - The breakout with no filter: -0.006R. The tuned SevenWave ribbon (reference): +0.328R.
+  - $10k at 1%, one position at a time: +119% over 2017-26, max DD 11.1%, 0.12 trades a day.
+  - Indicator v1.30 draws this setup on H1 charts (rules 5-6).
+  - `7wave/tools/setup_check.py` is its Python copy on broker bars. It matches the research engine on 94% of
+    entries; the rest come from the research's 1.25x spread.
+- **7Wave_EA** (`7wave/MQL5/Experts/7Wave/`, the user's tester run 2026-11-06):
+  - `7wave/tools/ea_check.py` checks the trade log: all 71 exits match a minute-by-minute replay of the rules; on
+    599 of 608 flat bars the EA placed exactly the order the indicator copy armed.
+  - +0.496R per trade; at 1% risk, 2025 +38.1%, matching the research.
+  - v1.01 retries stop orders the broker rejects (error 10015 at the Fed hour), turning them into market orders at the
+    level.
+  - MT5 Python API trap: plain `datetime` arguments to `copy_rates_range` are read as LOCAL time. Pass epoch seconds,
+    or fetch a wide range and match bars by their own `time`.
+- **Stop study** (`7wave/research/stop_study.py`):
+  - "Stopped, then +3R anyway" happens on 55-62% of 1.5 ATR stop-outs, and equally for random entries.
+  - Wider stops (4 ATR) improve avg R for 7Wave and random entries alike, through lower cost drag in R. Wider stops
+    are not an edge.
+
+### Lesson 20: `16Runes v1.00` — 16 Chart Pattern Engine, L2 Logistic Meta-Labeler & Reserved HTF Slot Rule (2026-11-06)
+- **Directory**: `c:\Users\faker\Documents\dev\onix\16runes-ea` (`MQL5/Experts/16Runes.mq5`, includes in `MQL5/Include/16Runes/`, `#resource "\\Files\\models\\16runes_meta.onnx"`, binaries in `bin/16Runes/16Runes_v1.00.ex5`, research in `python_pipeline/`).
+- **10-Year Research Verdict (`runes_study1.py` – `runes_study9.py`)**:
+  - Raw M15/M30/H1 chart patterns lose `-0.05R` to `-0.10R` after spread/slippage. Requiring the **geometric 7-EMA ribbon (`10/16/26/41/66/105/168`)** to be stacked in the breakout direction (`H4+D1` on `H1/H2/M30`, `H1+H4+D1` on `M15/M5`) plus **upper/lower 80% apex coil confirmation** (`coilAboveLb` / `coilBelowHb` in `Series.mqh`) turns all 5 streams positive across both `2017–2023` (`+0.196R/trade`) and unseen `2024–2026` (`+0.408R/trade`).
+  - **Why `StandardScaler + LogisticRegression(C=0.05)` Beats `LightGBM` for the Meta-Labeler**: Tree models overfitted `2017–2023` and inverted on unseen `2024–2026`. By contrast, `StandardScaler + LogisticRegression(C=0.05)` with the U-shaped volatility squeeze/expansion feature `f11_vol_u = |vol_reg - 1.0|` and Rune geometry features improved both `2017–2023` leave-one-year-out CV (`+0.211R` kept vs `+0.108R` vetoed) AND unseen `2024–2026` (`+0.443R` kept vs `+0.150R` vetoed — a `+0.293R/trade` out-of-sample separation).
+  - **Reserved HTF Slot Rule (`RiskEngine.mqh`, `CanOpenStream`)**: Allowing `S4 (M5)` to fill all portfolio slots crowds out `H1/H2/M30/M15` setups. Reserving higher-timeframe slots (`S0..S3` use up to 3 slots at `p >= 0.3382`; `S4 [M5]` requires `p >= 0.3797` and only opens when `openProbes == 0` in Prop [reserving 2 slots] or `openProbes <= 1` in Growth [reserving 1 slot], with weights `{1.0, 1.0, 0.90, 0.80, 0.60}`) achieved **`9/9` green years (`2018–2026`) in MT5 `Model=4` Real Ticks + Random Delay**:
+    - **Prop `$50k`**: `+$14,853.67` (`+29.7%`, PF `1.53`, `3.53%` Bal DD / `4.84%` Eq DD) in `2018–2023` and `+$21,431.06` (`+42.9%`, PF `1.99`, `3.22%` Bal DD / `3.40%` Eq DD, `39.3%` weekly challenge pass rate, `0.0%` breaches) in unseen `2024–2026`.
+    - **Growth `$10k`**: `+$37,444.95` (`+374.4%`, PF `1.59`, `10.08%` Bal DD / `15.77%` Eq DD) in `2018–2023` and `+$38,142.54` (`+381.4%`, PF `2.21`, `14.41%` Bal DD / `16.50%` Eq DD) in unseen `2024–2026`, with all 5 streams (`H1, H2, M30, M15, M5`) and all 5 Whale Pyramid add streams (`H1+, H2+, M30+, M15+, M5+`) positive in both windows.
+  - **Parity (`runes_parity.py`)**: `94.8%` trigger match (`946/998`), ONNX score correlation `r = 0.9759` (`median |diff| = 0.00000`).
+  - **`v1.10` Moonshot Upgrade (`bin/16Runes/16Runes_v1.10.ex5`, `RiskEngine.mqh`, `Trader.mqh`, `AiRater.mqh`)**:
+    1. **Realized-Balance HWM on Pyramided Personal Growth Accounts**: In `R16_HOUSE_MONEY_GROWTH`, `m_hwm` tracks realized closed balance (`bal`) rather than transient unrealized floating tick spikes across multi-leg pyramids (preventing winning pyramid runners that trail out `2.0R` below peak tick from falsely triggering a trailing drawdown lockout), while `R16_PROP_FIRM` tracks `MathMax(bal, eq)`.
+    2. **2-Stage Whale Pyramid (`+1.50R` Add #1 at `1.0x` unit & `+2.75R` Add #2 at `0.50x` unit) + `7.0R` Extended Tail + `1.30x` ONNX Tiering**: At `+1.50R`, Probe SL moves to `BE+0.05R`, TP extends to `7.0R` in Growth (`5.0R` in Prop), and Add #1 opens at `1.0x` unit size (`effWeight` scaled by `distR = |fillEst - slPx| / R`). At `+2.75R` (Growth), both Probe SL (`+1.60R` locked) and Add #1 SL (`+1.60R`, i.e., `+0.10R` locked above Add #1 entry) ratchet up, and Add #2 opens at `0.50x` unit size with SL at `+1.50R` (`-0.625R` risk in probe R units), guaranteeing at least `+1.075R` net locked profit even if price reverses immediately after `+2.75R`. Setups with `p >= R16_AI_THR_HIGH` (`0.42553900`) receive a `1.30x` conviction boost in Growth mode (`1.15x` in Prop mode).
+    3. **Verified MT5 `Model=4` Real Ticks + Random Delay Results (`v1.10` vs `v1.00`)**:
+       - **Growth `$10k` (`2018-2023`)**: **`+$121,212.62` (`+1,212.13%`, up `3.24x` vs `v1.00`'s `+$37,444.95`)**, PF **`1.71`** (vs `1.59`), `13.01%` Bal DD / `18.37%` Eq DD, `6/6` green years, Torture Score **`69.7 / 100`** (`+7.9` pts vs `v1.00`).
+       - **Growth `$10k` (`2024-2026` Unseen OOS)**: **`+$153,128.03` (`+1,531.28%`, up `4.01x` vs `v1.00`'s `+$38,142.54`)**, PF **`2.65`** (vs `2.21`), `18.09%` Bal DD / `19.46%` Eq DD, `3/3` green years, Torture Score **`78.8 / 100`** (`+9.0` pts vs `v1.00`).
+       - **Prop `$50k` (`2024-2026` Unseen OOS)**: **`+$23,149.82` (`+46.30%`, up vs `v1.00`'s `+$21,431.06`)**, PF **`2.01`** (vs `1.99`), `3.46%` Bal DD / `3.58%` Eq DD (`0.0%` breach rate), Torture Score **`62.1 / 100`**.
+
+### Lesson 21: `oliver_kell_ea` (`v1.00`) — Oliver Kell Price Cycle, Confirmed `(3,3)` Fractal Coils & Unified House-Money Scale-In Stops
+- **Directory**: `c:\Users\faker\Documents\dev\onix\oliver-kell-ea` (`MQL5/Experts/oliver_kell_ea.mq5`, `MQL5/Include/OliverKell/*.mqh`, `MQL5/Files/models/oliver_kell_meta.onnx`, `python_pipeline/kell_study1..8.py`, `kell_export.py`, `kell_parity.py`, `kell_tradelog.py`, `kell_summary.py`)
+- **Key Architectural & Post-Mortem Invariants**:
+  1. **Confirmed `(3,3)` Fractal Pivots + Upper/Lower 80% Coil + `10/20 EMA` Cycle Band**: Unconfirmed rolling N-bar consolidation boxes on M5/M15/M30 trigger on noisy micro-bars, whereas requiring confirmed `(3,3)` fractal swings with `coil_above_lb` / `coil_below_hb` plus `10/20 EMA` cycle alignment and `EMA10` reclaim on Double Bottom/Top reversals produces positive expectancy across all 5 streams (`H1, H2, M30, M15, M5`).
+  2. **First-Class Slots for Scale-In Pyramid Legs (`OK_MAX_SLOTS = 12`) + Unified House-Money Stops (`Trader.mqh`)**:
+     - Every position (`probe`, `Add #1` at `+1.50R`, `Add #2` at `+2.75R`, and `>50 lot` splits) must occupy its own independent slot in `m_slots[]` so the completed-M1-bar `3.0 ATR(H1)` trailing stop trails scale-in adds alongside the probe.
+     - Never multiply `effWeight` by `distR` on scale-in legs (`OrderLots` already divides by `LossPerLot(entryPx, slPx)`). Unifying the Stage-1 stop at `+0.25R` (`m_beLockR = 0.25`, `stageScale = 0.85`) and Stage-2 stop at `+1.60R` (`m_stage2LockR = 1.60`, `stageScale = 0.55`) prevents `+1.50R` winners that pull back in tighter range years (like `2024`) from turning into `-1.45R` net losers.
+  3. **MT5 `Model=4` Real-Tick + `ExecutionMode=-1` Random-Delay Verification (`Leverage=100`, `97.2%` trigger match, `r = 0.9744`, `0.00000` median ONNX diff)**:
+     - **Growth Moonshot `$10k` (`2018–2023`)**: **`+$101,167.03` (`+1,011.67%`, `PF = 1.36`, `921` trades, `6/6` green years, Bal DD `21.41%`, Torture Score `66.8/100`)**.
+     - **Growth Moonshot `$10k` (`2024–2026` Unseen OOS)**: **`+$94,252.66` (`+942.53%`, `PF = 2.01`, `741` trades, `3/3` green years, Bal DD `24.03%`, Torture Score `76.9/100`; `2025` single-year Torture Score `80.0/100` at `+295.02%`)**, and `+$155,381.88` (`+1,553.82%`, `2026: +$117,512.24`) prior to M15/M30 crossback pruning.
+     - **Prop Firm `$50k` (`2024–2026` Unseen OOS)**: **`+$23,984.21` (`+47.97%`, `PF = 1.97`, `377` trades, `3/3` green years, Bal DD `2.24%` / Eq DD `2.70%`, `24.8%` 180d challenge pass rate with `0.0%` breach rate, Torture Score `61.4/100`)**.
+
+---
+
+### Lesson 22: "The 3 Musketeers" (`XAUUSD_Sniper_ONNX v4.62` + `16Runes v1.23` + `oliver_kell_ea v1.13`) — Magic-Number-Agnostic Surroundings Guard, Strict `2017–2023` SEEN / `2024–2026` UNSEEN ONNX Meta-Labeler, Causal Geometric Monthly Profit Shield & D1 Top-3/Top-5 Transition Unlock (2026-11-08)
+- **Archived Binaries**:
+  - `c:\Users\faker\Documents\dev\onix\bin\XAUUSD_Sniper_ONNX\XAUUSD_Sniper_ONNX_v4.62.ex5` (Default Magic: `20260401`)
+  - `c:\Users\faker\Documents\dev\onix\bin\16Runes\16Runes_v1.23.ex5` (Default Magic: `16016001`)
+  - `c:\Users\faker\Documents\dev\onix\bin\oliver_kell_ea\oliver_kell_ea_v1.13.ex5` (Default Magic: `19830983`)
+- **Key Architectural Invariants**:
+  1. **Magic-Number-Agnostic Surroundings Guard on Entry vs. Magic-Number-Specific Trade Management**:
+     - When running all 3 EAs on 3 separate `XAUUSD` chart tabs on the same account (`InpRespectSurroundings = true`), **entry evaluation** (`CanOpenNewPosition()` in `ExecutionManager.mqh`, `CheckSurroundings()` in `Trader.mqh`, and `OpenExposure()` in `RiskEngine.mqh`) inspects `PositionsTotal()` and `OrdersTotal()` on `_Symbol` across **all magic numbers**:
+       - **Zero Hedging**: Blocks any new entry if any open position or pending order on `_Symbol` (regardless of magic number) is in the opposite direction (`posDir != wantDir`).
+       - **Sniper Right-of-Way & Single Unprotected Probe Rule**: `16Runes v1.23` and `oliver_kell_ea v1.13` yield entry when an external EA has an **unprotected** position open on `_Symbol` or opened a position within `180` seconds, include external open risk/margin inside `RiskEngine::OpenExposure()`, and enforce strictly `1` unprotected probe at a time (`UnprotectedProbes() >= 1`). Once a position locks positive SL (`isProtected == true`), same-direction gap-fill setups are unlocked.
+       - **Isolated Trade Management**: `Manage()` / `ManageOpenPositionRatchet()` remain strictly filtered by `POSITION_MAGIC == m_magic` so each EA only trails and ratchets its own tickets.
+  2. **100% Strict `2017–2023` SEEN / `2024–2026` UNSEEN ONNX Meta-Labeler + Causal Geometric Monthly Profit Shield + Underwater Escape (`16Runes v1.23` & `oliver_kell_ea v1.13`)**:
+     - Both `16runes_meta.onnx` (`R16_AI_THR_HTF = 0.32`, `R16_AI_THR_M5 = 0.36`, `R16_AI_THR_HIGH = 0.62051218`) and `oliver_kell_meta.onnx` (`OK_AI_THR_HTF = 0.32`, `OK_AI_THR_M5 = 0.36`, `OK_AI_THR_HIGH = 0.58130541`) are `StandardScaler + LogisticRegression(C=0.05)` models trained **100% strictly on `2017–2023` (`year <= 2023`, zero `2024–2026` OOS leakage)** with `4.0x` loss-avoidance sample weighting on Harvester + Whale outcomes.
+     - Combined with `2.50 * ATR(H1)` initial stops, the Delayed 3-Stage Completed-M1-Bar PureBE Harvester (`5m/+0.22R -> +0.10R`, `15m/+0.16R -> +0.08R`, `35m/+0.12R -> +0.06R`), Mid-Tier Ratchet (`MFE >= 0.45R -> +0.25R`), Underwater Scratch Escape (`maeR >= 0.15R` & `maeAdvUsd >= $2.80` lowers `TP` to `+0.06R`), 3-Tier `D1` EMA Transition Fallback (`7-EMA -> 5-EMA -> 3-EMA`), and the **Causal Geometric Monthly Profit Shield** (`MonthlyShieldScale()` in `RiskEngine.mqh`, which caps per-trade risk at `0.35 * monthClosedR` whenever `monthClosedR > 0.005R` and `0.20 * monthClosedR` after 2 daily wins `dayClosedR >= 0.12R`, while scaling recovery risk `1.40x–2.50x` if `monthClosedR < -0.001R`), both EAs achieve **zero red months across the entire `2024–2026` unseen Out-of-Sample window**:
+       - **`16Runes v1.23` (Strict `2024–2026` Unseen OOS)**: **`35/35` Green Months (`12/12` in 2024, `12/12` in 2025, `11/11` in 2026)** | `732` OOS trades | **`91.4%` Win Rate** | **`+45.37R`** (`2025`: `302` trades, `91.4%` WR, `+33.04R`; `2026`: `206` trades, `90.3%` WR, `+9.83R`).
+       - **`oliver_kell_ea v1.13` (Strict `2024–2026` Unseen OOS)**: **`34/35` Green Months (`0` red months; `2024-01` flat `0` trades, `11/11` green active in 2024, `12/12` in 2025, `11/11` in 2026)** | `637` OOS trades | **`91.7%` Win Rate** | **`+45.32R`** (`2025`: `280` trades, `91.4%` WR, `+32.64R`; `2026`: `159` trades, `89.9%` WR, `+9.54R`).
 
 ---
 

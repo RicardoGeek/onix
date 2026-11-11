@@ -1,0 +1,35 @@
+; ============================================================================
+; THE 3 MUSKETEERS — TAB 1: XAUUSD_Sniper_ONNX v4.62 (LIVE FUNDED PROP PRESET)
+; Symbol: XAUUSD | Recommended Chart Timeframe: M5 | Magic Number: 20260401
+; Target: Smooth Funded-Account Payout Harvesting (<3.0% Daily / <6.0% Total DD)
+; ============================================================================
+InpRiskMode=0
+InpDrawdownType=1
+InpCommissionPerLotRoundTurn=7.00
+InpPropTier2RiskPct=0.75
+InpPropTier1RiskPct=1.25
+InpGrowthTier2RiskPct=1.10
+InpGrowthTier1RiskPct=1.92
+InpUseOnnxModel=true
+InpOnnxTier2Threshold=0.58
+InpOnnxTier1Threshold=0.72
+InpBrokerGMTOffsetHours=2
+InpVPBinSizeUSD=0.25
+InpMinSweepAtrRatio=0.15
+InpMaxSweepAtrRatio=0.65
+InpMinAbsorptionVolRatio=1.50
+InpMaxReclaimBarsM5=3
+InpLimitExpiryBarsM5=3
+InpEnableVerticalTimeBarrier=true
+InpVerticalBarrierHours=4
+InpEnableCalendarFilter=true
+InpMaxSpreadMultiplier=1.80
+InpHardMaxSpreadUSD=0.80
+InpMagicNumber=20260401
+InpMaxSlippagePoints=30
+InpEnableCsvTelemetry=true
+InpCsvUseCommonFolder=false
+InpLogLevel=1
+InpShowChartHUD=true
+InpGoldeenToken=
+InpGoldeenUrl=https://api.goldeen.io/api/v1/ea/report

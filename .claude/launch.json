@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "7wave-trainer",
+      "runtimeExecutable": "C:\\Users\\faker\\mlv\\Scripts\\python.exe",
+      "runtimeArgs": ["-m", "http.server", "8765", "--bind", "127.0.0.1", "--directory", "C:\\Users\\faker\\Documents\\dev\\onix\\7wave\\trainer"],
+      "port": 8765
+    }
+  ]
+}

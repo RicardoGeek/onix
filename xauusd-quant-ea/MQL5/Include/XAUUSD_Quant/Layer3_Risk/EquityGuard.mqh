@@ -489,9 +489,11 @@ public:
    double             GetCurrentTotalDrawdownPct() const
      {
       double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-      double anchor = (m_ddType == DD_TRAILING_HWM || m_riskMode == MODE_ASYMMETRIC_GROWTH)
-                      ? m_highWaterMark
-                      : m_initialBalance;
+      double anchor = (m_riskMode == MODE_PROP_GUARD)
+                      ? m_initialBalance
+                      : ((m_ddType == DD_TRAILING_HWM || m_riskMode == MODE_ASYMMETRIC_GROWTH)
+                         ? m_highWaterMark
+                         : m_initialBalance);
       if(anchor <= 0.0)
          return 0.0;
       double ddUSD = MathMax(0.0, anchor - equity);
@@ -595,9 +597,11 @@ public:
       double totalLimitPct = GetTotalBreakerLimitPct();
       if(currentTotalDDPct >= totalLimitPct)
         {
-         double anchor = (m_ddType == DD_TRAILING_HWM || m_riskMode == MODE_ASYMMETRIC_GROWTH)
-                         ? m_highWaterMark
-                         : m_initialBalance;
+         double anchor = (m_riskMode == MODE_PROP_GUARD)
+                         ? m_initialBalance
+                         : ((m_ddType == DD_TRAILING_HWM || m_riskMode == MODE_ASYMMETRIC_GROWTH)
+                            ? m_highWaterMark
+                            : m_initialBalance);
          string msg = StringFormat(
             "Floating Equity ($%.2f) breached Max Total Drawdown Breaker (%.2f%% >= %.2f%% of Reference $%.2f)",
             equity, currentTotalDDPct, totalLimitPct, anchor);
@@ -628,10 +632,11 @@ public:
          m_consecutiveLossesToday = 0;
 
       // Update High-Water Mark after realized balance change
-      double bal = AccountInfoDouble(ACCOUNT_BALANCE);
-      double eq  = AccountInfoDouble(ACCOUNT_EQUITY);
-      if(MathMax(bal, eq) > m_highWaterMark)
-         m_highWaterMark = MathMax(bal, eq);
+      double bal          = AccountInfoDouble(ACCOUNT_BALANCE);
+      double eq           = AccountInfoDouble(ACCOUNT_EQUITY);
+      double peakAfterCls = (!HasAnyOwnBrokerExposure()) ? MathMax(bal, eq) : bal;
+      if(peakAfterCls > m_highWaterMark)
+         m_highWaterMark = peakAfterCls;
 
       // Mode A (MODE_PROP_GUARD) Daily Circuit Breakers:
       // 1) Lock trading until next day after 2 consecutive losses
@@ -679,15 +684,9 @@ public:
    //+------------------------------------------------------------------+
    bool               IsRolloverBlackoutUTC(const datetime utcNow) const
      {
-      MqlDateTime dt;
-      TimeToStruct(utcNow, dt);
-      int minuteOfDay = dt.hour * 60 + dt.min;
-
-      // 20:55 UTC = 1255 minutes; 22:10 UTC = 1330 minutes
-      const int rolloverStartMin = 20 * 60 + 55;
-      const int rolloverEndMin   = 22 * 60 + 10;
-
-      return (minuteOfDay >= rolloverStartMin && minuteOfDay <= rolloverEndMin);
+      MqlDateTime dtSrv;
+      TimeToStruct(TimeCurrent(), dtSrv);
+      return (dtSrv.hour == 0);
      }
 
    //+------------------------------------------------------------------+
@@ -723,12 +722,14 @@ public:
      {
       if(m_currentSpreadUSD <= 0.0)
          return true;
-      if(m_currentSpreadUSD > m_hardMaxSpreadUSD)
+      double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
+      double scaleHardMax = MathMax(m_hardMaxSpreadUSD, ask * 0.00025);
+      if(m_currentSpreadUSD > scaleHardMax)
          return true;
 
-      // Apply a realistic baseline floor ($0.12) so 1-tick tight spreads don't false-trigger at $0.18
-      double baselineAvg = MathMax(m_rollingAvgSpreadUSD, 0.12);
-      if(m_spreadSampleCount >= 10 && m_currentSpreadUSD > (m_maxSpreadMultiplier * baselineAvg))
+      double baselineAvg = MathMax(m_rollingAvgSpreadUSD, MathMax(0.20, ask * 0.00020));
+      double effMult     = MathMax(m_maxSpreadMultiplier, 3.50);
+      if(m_spreadSampleCount >= 10 && m_currentSpreadUSD > (effMult * baselineAvg))
          return true;
 
       return false;
@@ -839,8 +840,10 @@ public:
       outSnap.dailyDrawdownUSD          = MathMax(0.0, m_dayStartReference - eq);
       outSnap.dailyDrawdownPct          = GetCurrentDailyDrawdownPct();
       outSnap.dailyBreakerLimitPct      = GetDailyBreakerLimitPct();
-      double totalAnchor                = (m_ddType == DD_TRAILING_HWM || m_riskMode == MODE_ASYMMETRIC_GROWTH)
-                                          ? m_highWaterMark : m_initialBalance;
+      double totalAnchor                = (m_riskMode == MODE_PROP_GUARD)
+                                          ? m_initialBalance
+                                          : ((m_ddType == DD_TRAILING_HWM || m_riskMode == MODE_ASYMMETRIC_GROWTH)
+                                             ? m_highWaterMark : m_initialBalance);
       outSnap.totalDrawdownUSD          = MathMax(0.0, totalAnchor - eq);
       outSnap.totalDrawdownPct          = GetCurrentTotalDrawdownPct();
       outSnap.totalBreakerLimitPct      = GetTotalBreakerLimitPct();

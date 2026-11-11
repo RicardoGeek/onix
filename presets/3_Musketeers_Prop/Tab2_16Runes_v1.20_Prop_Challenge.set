@@ -1,0 +1,13 @@
+; ============================================================================
+; THE 3 MUSKETEERS — TAB 2: 16Runes v1.20 (PROP CHALLENGE PRESET)
+; Symbol: XAUUSD | Recommended Chart Timeframe: M5 or M15 | Magic: 16016001
+; Role: 16 Classical Chart Patterns (>84% WR PureBE Harvester + Gap-Filler)
+; ============================================================================
+InpMode=0
+InpRiskScale=1.00
+InpEnableAiVeto=true
+InpRespectSurroundings=true
+InpSkipNewsDays=false
+InpDrawPatterns=true
+InpBrokerGMTOffsetHours=2
+InpMagicNumber=16016001

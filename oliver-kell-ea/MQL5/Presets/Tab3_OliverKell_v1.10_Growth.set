@@ -1,0 +1,12 @@
+; ============================================================================
+; THE 3 MUSKETEERS — TAB 3: oliver_kell_ea v1.10 (PERSONAL GROWTH PRESET)
+; Symbol: XAUUSD | Chart Timeframe: M15 | Magic: 19830983
+; ============================================================================
+InpMode=1
+InpRiskScale=1.00
+InpEnableAiVeto=true
+InpRespectSurroundings=true
+InpSkipNewsDays=false
+InpDrawSetups=true
+InpBrokerGMTOffsetHours=2
+InpMagicNumber=19830983

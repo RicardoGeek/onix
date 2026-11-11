@@ -1,0 +1,121 @@
+"""Train + export the 16Runes ONNX Meta-Labeler (native MT5 contract, zipmap=False).
+
+Training data: Dukascopy 2017-01 .. 2023-12 16-Rune setups across 5 streams (H1, H2, M30, M15, M5).
+2024-2026 is NEVER seen during training or threshold selection, so 2024-2026 is 100% out-of-sample.
+
+Outputs:
+  MQL5/Files/models/16runes_meta.onnx          input "input" float32[1,16] -> "label" int64[1], "probabilities" float32[1,2]
+  MQL5/Include/16Runes/AiModelMeta.mqh         thresholds + feature order + training stamp
+  python_pipeline/models/16runes_meta.json
+"""
+import os
+import sys
+import json
+import numpy as np
+import pandas as pd
+import onnx
+import onnxruntime as ort
+from skl2onnx import convert_sklearn
+from skl2onnx.common.data_types import FloatTensorType
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
+sys.path.insert(0, r"c:\Users\faker\Documents\dev\onix\xauusd-sevenwave-ea\python_pipeline")
+from runes_study3 import RUNE_NAMES
+from runes_study4 import build_dataset, STREAMS
+from runes_study7 import extract_features, FEATS_16
+from runes_study9 import portfolio_sim_reserved_nb
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ONNX_PATH = os.path.join(ROOT, "MQL5", "Files", "models", "16runes_meta.onnx")
+META_MQH = os.path.join(ROOT, "MQL5", "Include", "16Runes", "AiModelMeta.mqh")
+META_JSON = os.path.join(ROOT, "python_pipeline", "models", "16runes_meta.json")
+TRAIN_END_YEAR = 2023
+
+if __name__ == "__main__":
+    m1a_d, tfs_d, df_d = build_dataset("duka")
+    X = extract_features(df_d)
+    r = df_d["r"].values
+    yr = df_d["year"].values
+    sel = yr <= TRAIN_END_YEAR
+    y = (r > 0.0).astype(np.int64)
+
+    clf = Pipeline([
+        ("sc", StandardScaler()),
+        ("lr", LogisticRegression(C=0.05, max_iter=500, random_state=42))
+    ])
+    clf.fit(X[sel], y[sel])
+
+    onx = convert_sklearn(
+        clf,
+        initial_types=[("input", FloatTensorType([1, X.shape[1]]))],
+        options={id(clf.named_steps["lr"]): {"zipmap": False}},
+        target_opset=13,
+    )
+    os.makedirs(os.path.dirname(ONNX_PATH), exist_ok=True)
+    onnx.save(onx, ONNX_PATH)
+
+    sess = ort.InferenceSession(ONNX_PATH)
+    print("ONNX inputs :", [(i.name, i.shape, i.type) for i in sess.get_inputs()])
+    print("ONNX outputs:", [(o.name, o.shape, o.type) for o in sess.get_outputs()])
+
+    p_ref = clf.predict_proba(X)[:, 1]
+    p_onx = np.array([sess.run(None, {"input": X[i:i + 1].astype(np.float32)})[1][0, 1] for i in range(len(X))])
+    max_diff = float(np.max(np.abs(p_ref - p_onx)))
+    print(f"ONNX parity max |diff| across all {len(X)} rows = {max_diff:.2e}")
+
+    thr_htf = float(np.quantile(p_onx[sel], 0.12))
+    thr_m5  = float(np.quantile(p_onx[sel], 0.35))
+    print(f"Trained on {sel.sum()} setups (2017-{TRAIN_END_YEAR}): thr_htf (q12)={thr_htf:.6f}, thr_m5 (q35)={thr_m5:.6f}")
+
+    # Verify weighted portfolio with stream weights [1.0, 1.0, 0.90, 0.80, 0.60]
+    w_arr = np.array([1.0, 1.0, 0.90, 0.80, 0.60])
+    df_d["p"] = p_onx
+    sub = df_d[((df_d.stream < 4) & (df_d.p >= thr_htf)) | ((df_d.stream == 4) & (df_d.p >= thr_m5))].reset_index(drop=True)
+    for mode_nm, slots, res_htf, pyr in [
+        ("Prop (3 slots, M5 reserves 2)", 3, 2, False),
+        ("Growth (3 slots, M5 reserves 1 + Pyramid)", 3, 1, True),
+    ]:
+        taken, pr_r, ad_r, xt, wh = portfolio_sim_reserved_nb(
+            sub.j.values, sub.dir.values, sub.px.values, sub.R.values, sub.trail.values,
+            sub.stream.values, sub.rune.values,
+            m1a_d["t"], m1a_d["o"], m1a_d["h"], m1a_d["l"], m1a_d["c"], m1a_d["spr"], m1a_d["tday"], m1a_d["nydow"],
+            slots, res_htf, pyr, 1.5, 0.05, 1.0, 3.0, 5.0, 1.5, 1440, 4320, 0.07, 0.10, 0.05, -0.80, 0.0
+        )
+        m = taken == 1
+        sw = w_arr[sub.stream.values[m]]
+        tot_r = (pr_r[m] + ad_r[m]) * sw
+        yrs = sub.year.values[m]
+        by_y = pd.Series(tot_r).groupby(yrs).sum()
+        print(f"  Weighted [{mode_nm}]: probes={m.sum()}  total={tot_r.sum():+.1f}R  green_yrs={int((by_y > 0).sum())}/{len(by_y)}")
+        print("    Years:", "  ".join(f"{y}:{v:+.1f}R" for y, v in by_y.items()))
+
+    meta = dict(
+        features=FEATS_16,
+        thr_htf=thr_htf,
+        thr_m5=thr_m5,
+        train_years=f"2017-{TRAIN_END_YEAR}",
+        n_train=int(sel.sum()),
+        model_type="StandardScaler + LogisticRegression(C=0.05)",
+        runes=RUNE_NAMES,
+        streams=[s[0] for s in STREAMS],
+        weights=w_arr.tolist(),
+    )
+    os.makedirs(os.path.dirname(META_JSON), exist_ok=True)
+    with open(META_JSON, "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, indent=2)
+
+    os.makedirs(os.path.dirname(META_MQH), exist_ok=True)
+    with open(META_MQH, "w", encoding="utf-8") as fh:
+        fh.write("//+------------------------------------------------------------------+\n")
+        fh.write("//| AiModelMeta.mqh - generated by python_pipeline/runes_export.py   |\n")
+        fh.write("//+------------------------------------------------------------------+\n")
+        fh.write("#ifndef RUNES16_AIMODELMETA_MQH\n#define RUNES16_AIMODELMETA_MQH\n")
+        fh.write(f"#define R16_AI_FEATURES {len(FEATS_16)}\n")
+        fh.write(f"#define R16_AI_THR_HTF  {thr_htf:.8f}\n")
+        fh.write(f"#define R16_AI_THR_M5   {thr_m5:.8f}\n")
+        fh.write(f"#define R16_AI_STAMP    \"Duka 2017-{TRAIN_END_YEAR}, {int(sel.sum())} setups, LogReg C=0.05\"\n")
+        fh.write("// feature order: " + ", ".join(FEATS_16) + "\n#endif\n")
+
+    print("Exported:", ONNX_PATH, META_MQH, META_JSON)

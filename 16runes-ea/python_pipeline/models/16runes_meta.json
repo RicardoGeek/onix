@@ -1,0 +1,25 @@
+{
+  "features": [
+    "f0_stream",
+    "f1_dir",
+    "f2_is_3piv",
+    "f3_is_asc_desc_tri",
+    "f4_is_sym_tri",
+    "f5_is_flag",
+    "f6_is_counter_wedge",
+    "f7_qual",
+    "f8_pat_h_atr",
+    "f9_comp_ratio",
+    "f10_imp_align",
+    "f11_vol_u",
+    "f12_vol_reg",
+    "f13_cost_atr",
+    "f14_h4_rib_sp",
+    "f15_liq_sess"
+  ],
+  "thr_htf": 0.46,
+  "thr_m5": 0.5,
+  "thr_high": 0.65,
+  "n_train": 4081,
+  "model_type": "GradientBoostingClassifier(n=160, d=5, leaf=15, lr=0.05)"
+}

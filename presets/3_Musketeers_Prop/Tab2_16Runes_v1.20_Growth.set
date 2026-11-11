@@ -1,0 +1,12 @@
+; ============================================================================
+; THE 3 MUSKETEERS — TAB 2: 16Runes v1.20 (PERSONAL GROWTH PRESET)
+; Symbol: XAUUSD | Chart Timeframe: M30 | Magic: 16016001
+; ============================================================================
+InpMode=1
+InpRiskScale=1.00
+InpEnableAiVeto=true
+InpRespectSurroundings=true
+InpSkipNewsDays=false
+InpDrawPatterns=true
+InpBrokerGMTOffsetHours=2
+InpMagicNumber=16016001

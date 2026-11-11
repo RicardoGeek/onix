@@ -1,0 +1,13 @@
+; ============================================================================
+; THE 3 MUSKETEERS — TAB 2: 16Runes v1.20 (LIVE FUNDED PROP PRESET)
+; Symbol: XAUUSD | Recommended Chart Timeframe: M5 or M15 | Magic: 16016001
+; Role: 16 Classical Chart Patterns (Smooth 0.75x Funded Payout Harvester)
+; ============================================================================
+InpMode=0
+InpRiskScale=0.75
+InpEnableAiVeto=true
+InpRespectSurroundings=true
+InpSkipNewsDays=true
+InpDrawPatterns=true
+InpBrokerGMTOffsetHours=2
+InpMagicNumber=16016001

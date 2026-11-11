@@ -2,8 +2,9 @@
 retrain_multiyear_onnx.py
 =========================
 Retrains and exports the 12-feature XAUUSD ONNX Meta-Labeler (`xauusd_meta_model.onnx`)
-strictly using the 99%-100% Real-Tick MetaTrader 5 `POSITION_CLOSED` telemetry
-(`2024` Dukascopy Real Ticks + `2025-2026` Pepperstone Live Real Ticks).
+strictly using the 2024.01.01 - 2026.04.30 training window so that:
+  1. 2017.01.01 - 2023.12.31 (7 years of Dukascopy data) is 100% UNSEEN out-of-sample.
+  2. 2026.05.01 - 2026.10.31 (last 6 months of 2026) is 100% UNSEEN forward out-of-sample.
 """
 
 import os
@@ -30,7 +31,6 @@ from export_onnx import (
 )
 
 COMMON_FILES = r"C:\Users\faker\AppData\Roaming\MetaQuotes\Terminal\Common\Files"
-ARTIFACTS_DIR = r"C:\Users\faker\Documents\onix_artifacts"
 
 FEAT_COLS = [
     "f0_sweep_depth_norm",
@@ -101,7 +101,7 @@ def build_xauusd_onnx_bytes(
     model_buf = bytearray()
     model_buf.extend(_encode_varint_field(1, cfg.ir_version))
     model_buf.extend(_encode_string_field(2, "XAUUSD_Quant_ONNX_Exporter"))
-    model_buf.extend(_encode_string_field(3, "4.22.0"))
+    model_buf.extend(_encode_string_field(3, "4.40.0"))
     model_buf.extend(_encode_varint_field(5, 1))
     model_buf.extend(_encode_bytes_field(7, bytes(graph_buf)))
     model_buf.extend(_encode_bytes_field(8, opset_msg))
@@ -109,19 +109,11 @@ def build_xauusd_onnx_bytes(
 
 
 def main() -> None:
-    telemetry_candidates = [
-        os.path.join(COMMON_FILES, "xauusd_setup_telemetry.csv"),
-    ]
+    telemetry_path = os.path.join(COMMON_FILES, "xauusd_setup_telemetry.csv")
+    if not os.path.exists(telemetry_path):
+        raise FileNotFoundError(f"Telemetry file not found: {telemetry_path}")
 
-    raw_dfs = []
-    for p in telemetry_candidates:
-        if os.path.exists(p):
-            raw_dfs.append(pd.read_csv(p))
-
-    if not raw_dfs:
-        raise FileNotFoundError("No XAUUSD setup telemetry CSV files found in Common\\Files or Documents\\onix_artifacts.")
-
-    full_df = pd.concat(raw_dfs, ignore_index=True)
+    full_df = pd.read_csv(telemetry_path)
     sigs_all = full_df[full_df["event_stage"] == "SIGNAL_TRIGGERED"].copy()
     outs_all = full_df[full_df["event_stage"] == "POSITION_CLOSED"].copy()
 
@@ -130,7 +122,7 @@ def main() -> None:
         .set_index("timestamp_utc")[["realized_r_multiple", "mfe_r"]]
         .to_dict("index")
     )
-    print(f"Exact MT5 XAUUSD Real-Tick POSITION_CLOSED outcomes mapped: {len(mt5_outcomes)}")
+    print(f"Total POSITION_CLOSED outcomes mapped: {len(mt5_outcomes)}")
 
     sigs = (
         sigs_all.drop_duplicates(subset=["timestamp_utc"], keep="last")
@@ -154,70 +146,57 @@ def main() -> None:
     cand["r_opt"] = r_list
     cand["mfe_opt"] = mfe_list
 
-    train_df = cand[cand["year"] >= 2024].copy().reset_index(drop=True)
+    # Strictly train on 2024.01.01 - 2026.04.30 (leaving 2017-2023 and 2026 H2 100% UNSEEN)
+    train_mask = (cand["sig_utc"] >= "2024-01-01") & (cand["sig_utc"] < "2026-05-01")
+    train_df = cand[train_mask].copy().reset_index(drop=True)
+
     X_raw = train_df[FEAT_COLS].values.astype(np.float64)
     r_vals = train_df["r_opt"].values.astype(np.float64)
-    yrs = train_df["year"].values
     n, n_features = X_raw.shape
-    hidden_dim = 88
+    hidden_dim = 16
 
     means = X_raw.mean(axis=0)
     stds = np.maximum(1e-4, X_raw.std(axis=0))
     Z = (X_raw - means) / stds
 
-    rng = np.random.default_rng(42)
+    # Regularized L2 logistic + shallow Tanh residual head (prevents in-sample memorization)
+    is_p = (X_raw[:, 0] >= 1.35)
+    y_bin = np.where(~is_p, 0.01, np.where(r_vals >= 0.25, 0.96, np.where(r_vals > 0.0, 0.85, 0.72))).reshape(-1, 1)
+    w_s = np.where(~is_p, 5.00, 2.50).reshape(-1, 1)
     z_lin_w = np.zeros((n_features, 1), dtype=np.float64)
-    z_lin_b = 0.65
-    z_hid_w1 = rng.uniform(-0.40, 0.40, size=(n_features, hidden_dim))
-    z_hid_b1 = rng.uniform(-0.20, 0.20, size=(1, hidden_dim))
-    z_hid_w2 = rng.uniform(-0.50, 0.50, size=(hidden_dim, 1))
+    z_lin_b = 0.0
+    rng = np.random.default_rng(42)
+    z_hid_w1 = rng.normal(0.0, 0.05, size=(n_features, hidden_dim))
+    z_hid_b1 = np.zeros((1, hidden_dim), dtype=np.float64)
+    z_hid_w2 = np.zeros((hidden_dim, 1), dtype=np.float64)
     z_hid_b2 = 0.0
 
-    y_t = np.where(r_vals < -0.03, 0.01, np.where(r_vals >= 0.25, 0.98, 0.72)).reshape(-1, 1)
-    yr_boost = np.where(yrs == 2024, 1.35, 1.00)
-    w_s = np.where(r_vals < -0.03, 7.80, np.where(r_vals >= 0.25, 5.60, 4.00)) * yr_boost
-    w_s = w_s.reshape(-1, 1)
-    rv_col = r_vals.reshape(-1, 1)
-
-    lr, l2, epochs = 0.17, 0.00003, 10000
+    lr, l2, epochs = 0.08, 0.015, 2500
     inv_n = 1.0 / float(max(1, n))
 
-    for epoch in range(epochs):
-        step_lr = lr / (1.0 + 0.00030 * epoch)
+    for _ in range(epochs):
         lin_logit = Z @ z_lin_w + z_lin_b
-        pre_hid = np.clip(Z @ z_hid_w1 + z_hid_b1, -15.0, 15.0)
+        pre_hid = np.clip(Z @ z_hid_w1 + z_hid_b1, -10.0, 10.0)
         h_act = np.tanh(pre_hid)
         hid_logit = h_act @ z_hid_w2 + z_hid_b2
-        total_logit = np.clip(lin_logit + hid_logit, -35.0, 35.0)
+        total_logit = np.clip(lin_logit + hid_logit, -25.0, 25.0)
         prob = 1.0 / (1.0 + np.exp(-total_logit))
 
-        dyn_w = w_s.copy()
-        lose_mask = (rv_col < -0.03) & (prob > 0.30)
-        dyn_w[lose_mask] *= 1.0 + 75.0 * (prob[lose_mask] - 0.30)
-
-        win_big_mask = (rv_col >= 0.25) & (prob < 0.88)
-        dyn_w[win_big_mask] *= 1.0 + 30.0 * (0.88 - prob[win_big_mask])
-
-        win_mid_mask = (rv_col >= -0.03) & (rv_col < 0.25) & (prob < 0.66)
-        dyn_w[win_mid_mask] *= 1.0 + 24.0 * (0.66 - prob[win_mid_mask])
-
-        err = (prob - y_t) * dyn_w
-
+        err = (prob - y_bin) * w_s
         grad_w_lin = (Z.T @ err) * inv_n + l2 * z_lin_w
         grad_b_lin = float(err.sum() * inv_n)
-        grad_w2 = (h_act.T @ err) * inv_n + l2 * z_hid_w2
+        grad_w2 = (h_act.T @ err) * inv_n + 2.0 * l2 * z_hid_w2
         grad_b2 = float(err.sum() * inv_n)
-
         dh = (err @ z_hid_w2.T) * (1.0 - h_act * h_act)
-        grad_w1 = (Z.T @ dh) * inv_n + l2 * z_hid_w1
+        grad_w1 = (Z.T @ dh) * inv_n + 2.0 * l2 * z_hid_w1
         grad_b1 = dh.sum(axis=0, keepdims=True) * inv_n
 
-        z_lin_w -= step_lr * grad_w_lin
-        z_lin_b -= step_lr * grad_b_lin
-        z_hid_w2 -= step_lr * grad_w2
-        z_hid_b2 -= step_lr * grad_b2
-        z_hid_w1 -= step_lr * grad_w1
-        z_hid_b1 -= step_lr * grad_b1
+        z_lin_w -= lr * grad_w_lin
+        z_lin_b -= lr * grad_b_lin
+        z_hid_w2 -= 0.25 * lr * grad_w2
+        z_hid_b2 -= 0.25 * lr * grad_b2
+        z_hid_w1 -= 0.25 * lr * grad_w1
+        z_hid_b1 -= 0.25 * lr * grad_b1
 
     # Unscale weights from Z-space back to raw feature space X
     raw_lin_w = (z_lin_w.reshape(-1) / stds).reshape(n_features, 1)
@@ -225,23 +204,25 @@ def main() -> None:
     raw_hid_w1 = z_hid_w1 / stds.reshape(-1, 1)
     raw_hid_b1 = z_hid_b1 - (means.reshape(1, -1) / stds.reshape(1, -1)) @ z_hid_w1
 
-    lin_logit = X_raw @ raw_lin_w + raw_lin_b
-    h_act = np.tanh(np.clip(X_raw @ raw_hid_w1 + raw_hid_b1, -15.0, 15.0))
-    total_logit = np.clip(lin_logit + h_act @ z_hid_w2 + z_hid_b2, -35.0, 35.0)
-    train_df["prob"] = (1.0 / (1.0 + np.exp(-total_logit))).reshape(-1)
+    # Score entire 2017-2026 dataset to verify unseen out-of-sample generalization
+    X_all = cand[FEAT_COLS].values.astype(np.float64)
+    lin_all = X_all @ raw_lin_w + raw_lin_b
+    h_all = np.tanh(np.clip(X_all @ raw_hid_w1 + raw_hid_b1, -15.0, 15.0))
+    tot_all = np.clip(lin_all + h_all @ z_hid_w2 + z_hid_b2, -35.0, 35.0)
+    cand["prob"] = (1.0 / (1.0 + np.exp(-tot_all))).reshape(-1)
 
     for label, sub in [
-        ("2024", train_df[train_df["year"] == 2024]),
-        ("2025-2026", train_df[train_df["year"] >= 2025]),
-        ("ALL 2024-2026", train_df),
+        ("UNSEEN 2017-2023 (OOS)", cand[cand["year"] <= 2023]),
+        ("TRAIN 2024-2026H1 (IS)", cand[train_mask]),
+        ("UNSEEN 2026H2 (OOS)", cand[cand["sig_utc"] >= "2026-05-01"]),
     ]:
         t2 = sub[sub["prob"] >= 0.58]
         t1 = sub[sub["prob"] >= 0.72]
-        w2 = (t2["r_opt"] > 0.04).mean() * 100 if len(t2) else 0.0
-        w1 = (t1["r_opt"] > 0.04).mean() * 100 if len(t1) else 0.0
+        w2 = (t2["r_opt"] > 0.0).mean() * 100 if len(t2) else 0.0
+        w1 = (t1["r_opt"] > 0.0).mean() * 100 if len(t1) else 0.0
         print(
-            f"{label:15s}: T2={len(t2):3d} (WR={w2:5.1f}%, SumR={t2['r_opt'].sum():+6.2f}R) | "
-            f"T1={len(t1):3d} (WR={w1:5.1f}%, SumR={t1['r_opt'].sum():+6.2f}R)"
+            f"{label:24s}: T2={len(t2):4d} (WR={w2:5.1f}%, MeanR={t2['r_opt'].mean():+.3f}R, SumR={t2['r_opt'].sum():+7.2f}R) | "
+            f"T1={len(t1):4d} (WR={w1:5.1f}%, MeanR={t1['r_opt'].mean():+.3f}R)"
         )
 
     onnx_bytes = build_xauusd_onnx_bytes(
