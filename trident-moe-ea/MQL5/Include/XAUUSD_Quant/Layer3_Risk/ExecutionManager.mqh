@@ -47,6 +47,7 @@ private:
    double                m_commissionPerLotRoundTurn;
    int                   m_verticalBarrierSeconds;
    bool                  m_enableVerticalBarrier;
+   int                   m_lowDDExpiryM5Bars;
    CTrade                m_trade;
    CPositionInfo         m_posInfo;
    COrderInfo            m_ordInfo;
@@ -218,6 +219,7 @@ public:
       m_commissionPerLotRoundTurn = 7.0;
       m_verticalBarrierSeconds    = 4 * 3600; // 4-hour vertical time barrier
       m_enableVerticalBarrier     = true;
+      m_lowDDExpiryM5Bars         = 6;
       m_equityGuard               = NULL;
       m_positionSizer             = NULL;
       m_logger                    = NULL;
@@ -377,6 +379,7 @@ public:
       SyncBrokerState();
       return (m_ctx.hasPendingOrder || m_ctx.hasOpenPosition);
      }
+   void                  SetLowDDLimitExpiryBarsM5(const int bars) { m_lowDDExpiryM5Bars = (bars > 0 ? bars : 3); }
    bool                  HasPendingLimitOrder() const { return m_ctx.hasPendingOrder; }
    bool                  HasOpenPosition()      const { return m_ctx.hasOpenPosition; }
    bool                  CanOpenNewPosition(const ENUM_SIGNAL_DIRECTION candDir,
@@ -385,9 +388,10 @@ public:
       SyncBrokerState();
       if(m_ctx.hasPendingOrder)
          return false;
-      int      openCount        = 0;
-      int      unprotectedCount = 0;
-      datetime now              = TimeCurrent();
+      int      openCount             = 0;
+      int      ownUnprotectedCount   = 0;
+      int      totalUnprotectedCount = 0;
+      datetime now                   = TimeCurrent();
       for(int i = PositionsTotal() - 1; i >= 0; i--)
         {
          ulong t = PositionGetTicket(i);
@@ -405,7 +409,11 @@ public:
                               ? (posSL > posOpenPx + 0.01)
                               : (posSL > 0.0 && posSL < posOpenPx - 0.01);
          if(!isProtected)
-            unprotectedCount++;
+           {
+            totalUnprotectedCount++;
+            if(posMagic == m_magic)
+               ownUnprotectedCount++;
+           }
          if(posMagic == m_magic)
            {
             openCount++;
@@ -422,7 +430,7 @@ public:
                return false;
            }
         }
-      if(unprotectedCount >= 2)
+      if(ownUnprotectedCount >= 2 || totalUnprotectedCount >= 3)
          return false;
       for(int o = OrdersTotal() - 1; o >= 0; o--)
         {
@@ -629,13 +637,19 @@ public:
         {
          bool   shouldCancel = false;
          string cancelReason = "";
-         // 1. Check M5 bar expiration (Cancel if unfilled after 3 M5 bars / 15 minutes)
+         // 1. Check M5 bar expiration (6 M5 bars / 30m while Daily DD < 1.00%, else 3 M5 bars / 15m)
+         int effExpiryBars = m_ctx.expiryM5Bars;
+         if(m_lowDDExpiryM5Bars > effExpiryBars && m_equityGuard != NULL &&
+            m_equityGuard.GetCurrentDailyDrawdownPct() < 1.00)
+           {
+            effExpiryBars = m_lowDDExpiryM5Bars;
+           }
          int barShift = iBarShift(m_symbol, PERIOD_M5, m_ctx.orderPlacedM5BarTime, false);
-         if(barShift >= m_ctx.expiryM5Bars ||
-            (TimeCurrent() - m_ctx.orderPlacedTime) >= (m_ctx.expiryM5Bars * 300))
+         if(barShift >= effExpiryBars ||
+            (TimeCurrent() - m_ctx.orderPlacedTime) >= (effExpiryBars * 300))
            {
             shouldCancel = true;
-            cancelReason = StringFormat("Expired after %d M5 bars without fill", m_ctx.expiryM5Bars);
+            cancelReason = StringFormat("Expired after %d M5 bars without fill", effExpiryBars);
            }
          // 2. Cancel if an off-peak hour starts while stop order is unfilled
          if(!shouldCancel)

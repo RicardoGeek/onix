@@ -42,11 +42,13 @@
 #define ONNX_PROB_TIER2_MIN              0.58
 #define ONNX_PROB_TIER1_MIN              0.72
 
-//--- Mode A (Prop Guard) Risk Parameters
-#define PROP_TIER2_RISK_PCT              0.48
-#define PROP_TIER1_RISK_PCT              0.62
+//--- Mode A (Prop Guard) Risk Parameters (Aligned with PositionSizer Ramp)
+#define PROP_BASE_RISK_PCT               1.27
+#define PROP_HOUSE_MONEY_MAX_RISK_PCT    2.71
+#define PROP_TIER2_RISK_PCT              1.27
+#define PROP_TIER1_RISK_PCT              2.71
 #define PROP_HOUSE_MONEY_SHARE           0.25
-#define PROP_MAX_EFFECTIVE_RISK_PCT      1.85
+#define PROP_MAX_EFFECTIVE_RISK_PCT      2.71
 #define PROP_DD_DAMPENER_TRIGGER_PCT     2.00
 #define PROP_DD_DAMPENER_MULTIPLIER      0.60
 #define PROP_MAX_CONSECUTIVE_LOSSES      8

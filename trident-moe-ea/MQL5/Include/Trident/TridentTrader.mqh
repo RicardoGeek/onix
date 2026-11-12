@@ -51,10 +51,12 @@ public:
 
                      CTridentRisk(void) : CR16Risk(), m_moeGapFillMode(true), m_gapFillRiskPct(0.35) {}
 
-   void              ConfigureMoE(bool moeGapFillMode, double gapFillRiskPct)
+   void              ConfigureMoE(bool moeGapFillMode, double gapFillRiskPct, double dailyProfitLockPct = 15.00)
      {
       m_moeGapFillMode = moeGapFillMode;
       m_gapFillRiskPct = MathMax(0.10, MathMin(1.20, gapFillRiskPct));
+      if(m_mode == R16_PROP_FIRM && dailyProfitLockPct > 0.0)
+         m_dayProfitLockPct = dailyProfitLockPct;
      }
 
    //--- Unified Trident Tracker Sync: Prevents unrealized floating MFE spikes from
@@ -129,7 +131,9 @@ public:
       double roomUsd  = MathMin(dRoomUsd, tRoomUsd);
 
       bool   inHouseMoney = (bal >= m_initBalance * 1.04 && TotalDdPct() < 1.80 && DailyDdPct() < 1.00);
-      double effBasePct   = inHouseMoney ? (m_gapFillRiskPct * 1.35) : m_gapFillRiskPct;
+      bool   inStartup    = (m_initBalance > 0.0 && bal < m_initBalance * 1.01);
+      double effBasePct   = inHouseMoney ? (m_gapFillRiskPct * 1.35)
+                                         : (inStartup ? (m_gapFillRiskPct * 0.55) : m_gapFillRiskPct);
       double byRoom       = roomUsd * 0.28;
       double byBase       = base * (effBasePct / 100.0) * effectiveWeight;
       double riskUsd      = MathMin(byRoom, byBase);
@@ -255,10 +259,10 @@ public:
 
       if(moeMode)
         {
-         // Exact Harvester + Whale parameters from sim_4corners_vs_3musketeers.py (1.35 * 1.50 ATR = 2.025 ATR)
+         // SEEN-Calibrated (2017-2023) Breathing Harvester + Whale parameters (2.025 * ATR14(H1))
          m_slAtrMult   = 2.025;
-         m_beAtR       = 1.40;
-         m_beLockR     = 0.25;
+         m_beAtR       = 1.25;
+         m_beLockR     = 0.35;
          m_pyr2AtR     = 2.60;
          m_pyr2LockR   = 1.50;
          m_pyr2SlR     = 1.50;
@@ -381,7 +385,7 @@ public:
 
    bool              StreamHasProbe(int s) const
      {
-      if(UnprotectedProbes() >= 1)
+      if(UnprotectedProbes() >= 2)
          return true;
       for(int i = 0; i < TRIDENT_MAX_SLOTS; i++)
          if(m_slots[i].active && !m_slots[i].isAdd && m_slots[i].stream == s && !m_slots[i].isProtected)
@@ -782,9 +786,7 @@ public:
             double clFavUsd      = d * (m1Cl - px0);
             double targetLockUsd = -1.0;
 
-            double escMaeTrig = risk.m_moeGapFillMode ? 0.07 : 0.15;
-            double escMinUsd  = risk.m_moeGapFillMode ? 0.10 : 2.80;
-            if(!m_slots[i].isProtected && maeR >= escMaeTrig && m_slots[i].maeAdvUsd >= escMinUsd)
+            if(!risk.m_moeGapFillMode && !m_slots[i].isProtected && maeR >= 0.15 && m_slots[i].maeAdvUsd >= 2.80)
               {
                double escTp = NormPrice(px0 + d * MathMax(0.25, 0.05 * R));
                if(((d == 1 && escTp < m_slots[i].tpPx - tickSz) ||
@@ -796,14 +798,30 @@ public:
                  }
               }
 
-            if(mfeR >= 0.45 && clFavUsd >= 0.25 * R)
-               targetLockUsd = MathMax(0.25, 0.25 * R);
-            else if(elapsedSec >= 300 && mfeR >= 0.22)
-               targetLockUsd = MathMax(0.22, 0.08 * R);
-            else if(elapsedSec >= 900 && mfeR >= 0.16)
-               targetLockUsd = MathMax(0.22, 0.06 * R);
-            else if(elapsedSec >= 2100 && mfeR >= 0.11)
-               targetLockUsd = MathMax(0.22, 0.05 * R);
+            if(risk.m_moeGapFillMode)
+              {
+               // SEEN-Calibrated Breathing Harvester: lets coils develop into true >= 0.25R..6.0R runners
+               long htfMult = (m_slots[i].stream <= 2) ? 2 : 1;
+               if(mfeR >= 0.60 && clFavUsd >= 0.28 * R)
+                  targetLockUsd = MathMax(0.25, 0.28 * R);
+               else if(elapsedSec >= (900 * htfMult) && mfeR >= 0.32)
+                  targetLockUsd = MathMax(0.22, 0.10 * R);
+               else if(elapsedSec >= (1800 * htfMult) && mfeR >= 0.22)
+                  targetLockUsd = MathMax(0.22, 0.08 * R);
+               else if(elapsedSec >= (3600 * htfMult) && mfeR >= 0.16)
+                  targetLockUsd = MathMax(0.22, 0.06 * R);
+              }
+            else
+              {
+               if(mfeR >= 0.45 && clFavUsd >= 0.25 * R)
+                  targetLockUsd = MathMax(0.25, 0.25 * R);
+               else if(elapsedSec >= 300 && mfeR >= 0.22)
+                  targetLockUsd = MathMax(0.22, 0.08 * R);
+               else if(elapsedSec >= 900 && mfeR >= 0.16)
+                  targetLockUsd = MathMax(0.22, 0.06 * R);
+               else if(elapsedSec >= 2100 && mfeR >= 0.11)
+                  targetLockUsd = MathMax(0.22, 0.05 * R);
+              }
 
             if(targetLockUsd > 0.0 && clFavUsd >= (targetLockUsd + cushUsd) && d * (favor - px0) >= (targetLockUsd + cushUsd))
               {

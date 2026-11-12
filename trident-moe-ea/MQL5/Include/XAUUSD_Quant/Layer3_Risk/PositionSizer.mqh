@@ -149,10 +149,10 @@ public:
          double initBal     = (m_equityGuard.GetInitialBalance() > 0.0 ? m_equityGuard.GetInitialBalance() : 50000.0);
          double dayStartRef = (m_equityGuard.GetDayStartReference() > 0.0 ? m_equityGuard.GetDayStartReference() : equity);
          double cm          = MathMax(0.75, MathMin(1.35, confRiskMultiplier));
-         double sRiskUSD    = initBal * 0.0127; // $635 base on $50k
-         double rStartUSD   = initBal * 1.0080; // $50,400 ramp start on $50k
-         double rSpanUSD    = initBal * 0.0350; // $1,750 ramp span on $50k
-         double maxPct      = 0.0271;
+         double sRiskUSD    = initBal * (m_propTier2RiskPct / 100.0); // $635 base at 1.27% on $50k
+         double rStartUSD   = initBal * 1.0080;                       // $50,400 ramp start on $50k
+         double rSpanUSD    = initBal * 0.0350;                       // $1,750 ramp span on $50k
+         double maxPct      = m_propTier1RiskPct / 100.0;             // 2.71% House-Money max
          if(equity <= rStartUSD)
             baseRiskUSD = sRiskUSD * cm;
          else
@@ -171,7 +171,24 @@ public:
             totCapUSD = remTotFloor * 0.48;
          else
             totCapUSD = remTotFloor * 0.88;
-         double remDayFloor   = MathMax(0.0, dayStartRef * 0.0276 - MathMax(0.0, dayStartRef - equity));
+         // Deduct any active unprotected stop-loss risk across all 3 Trident Prongs on this symbol
+         double openStopRiskUSD = 0.0;
+         double cSizeEst = SymbolInfoDouble(m_symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+         if(cSizeEst <= 0.0) cSizeEst = 100.0;
+         for(int p = PositionsTotal() - 1; p >= 0; p--)
+           {
+            ulong ptk = PositionGetTicket(p);
+            if(ptk == 0 || PositionGetString(POSITION_SYMBOL) != m_symbol)
+               continue;
+            long   pType = PositionGetInteger(POSITION_TYPE);
+            double pVol  = PositionGetDouble(POSITION_VOLUME);
+            double pOpen = PositionGetDouble(POSITION_PRICE_OPEN);
+            double pSL   = PositionGetDouble(POSITION_SL);
+            bool   inRisk = (pType == POSITION_TYPE_BUY) ? (pSL > 0.0 && pSL < pOpen) : (pSL > pOpen);
+            if(inRisk && pVol > 0.0)
+               openStopRiskUSD += pVol * (cSizeEst * MathAbs(pOpen - pSL) + m_commissionPerLotRoundTurn);
+           }
+         double remDayFloor   = MathMax(0.0, dayStartRef * 0.0276 - MathMax(0.0, dayStartRef - equity) - openStopRiskUSD);
          riskCapitalUSD       = MathMin(MathMin(baseRiskUSD, dayStartRef * maxPct), MathMin(remDayFloor * 0.94, totCapUSD));
          baseRiskPct          = (baseRiskUSD / equity) * 100.0;
          effectiveRiskPct     = (riskCapitalUSD / equity) * 100.0;

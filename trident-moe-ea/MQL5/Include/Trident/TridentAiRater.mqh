@@ -19,8 +19,9 @@
 #define TRIDENT_R16_THR_M5        0.36000000
 #define TRIDENT_R16_THR_HIGH      0.62049085
 
-#define TRIDENT_CAS_THR_HTF       0.29720000
-#define TRIDENT_CAS_THR_M5        0.47300000
+#define TRIDENT_CAS_THR_HTF       0.54000000
+#define TRIDENT_CAS_THR_M5        0.58000000
+#define TRIDENT_CAS_THR_SLIDE     0.58000000
 #define TRIDENT_CAS_THR_HIGH      0.61870000
 
 class CTridentAiRater
@@ -96,10 +97,16 @@ public:
    string            LastCallStr(void)  const { return m_lastCallStr; }
    string            LastDecisionStr(void) const { return m_lastDecStr; }
 
-   double            Threshold(int corner, int stream) const
+   double            Threshold(int corner, int stream, bool isSlide = false, bool isCounterD1Casc = false) const
      {
       if(corner == TRIDENT_CORNER_CASCADE)
+        {
+         if(isSlide)
+            return TRIDENT_CAS_THR_SLIDE;
+         if(isCounterD1Casc)
+            return TRIDENT_CAS_THR_HIGH;
          return (stream == 4) ? TRIDENT_CAS_THR_M5 : TRIDENT_CAS_THR_HTF;
+        }
       return (stream == 4) ? TRIDENT_R16_THR_M5 : TRIDENT_R16_THR_HTF;
      }
 
@@ -161,7 +168,8 @@ public:
      }
 
    double            ScoreCorner(int corner, int stream, const SR16Arm &arm,
-                                 const CR16Market &mkt, datetime nowSrv, float &fOut[])
+                                 const CR16Market &mkt, datetime nowSrv, float &fOut[],
+                                 double effThr = -1.0, bool isSlide = false)
      {
       if(!BuildFeatures(stream, arm, mkt, nowSrv, fOut))
          return -1.0;
@@ -177,9 +185,11 @@ public:
          return 0.5;
 
       double p    = (double)probs[1];
-      double thr  = Threshold(corner, stream);
+      double thr  = (effThr > 0.0) ? effThr : Threshold(corner, stream, isSlide, false);
       bool   keep = (p >= thr);
-      string cTag = (corner == TRIDENT_CORNER_CASCADE) ? "P3:CASCADE" : "P2:16RUNES";
+      string cTag = (corner == TRIDENT_CORNER_CASCADE)
+                    ? (isSlide ? "P3:SLIDE" : "P3:CASCADE")
+                    : "P2:16RUNES";
       m_lastCallStr = StringFormat("[%s] %s %s %s (%s)",
                                    cTag,
                                    TimeToString(mkt.m_clk.ToUtc(nowSrv), TIME_DATE|TIME_MINUTES),

@@ -7,9 +7,10 @@
 //|      Active when H4 7-EMA stack == D1 stack (and H1 stack for    |
 //|      M15/M5).                                                    |
 //|  * Corner #4 (Prong 3 - ImpulseCascade):                         |
-//|      Active ONLY when Corner #2 is OFF (GateRunesDir == 0) AND   |
-//|      H4 Top-3 EMA stack == H1 Top-5 EMA stack AND H1 volatility  |
-//|      regime >= 0.85x 20-day mean ATR.                            |
+//|      Active ONLY when Corner #2 is OFF (GateRunesDir == 0):      |
+//|      (a) Full Cascade: H4 Top-3 == H1 Top-5 & H1 VolReg >= 0.85; |
+//|      (b) Day-1 Counter-D1 Slide: H1 Top-5 == -D1 while H4 lags   |
+//|          (streams H1/M30/M15/M5, gated by impulse_cascade ONNX). |
 //|  * Corner #3 (Tangled Chop):                                     |
 //|      Both gates return 0 -> sits out.                            |
 //+------------------------------------------------------------------+
@@ -30,7 +31,9 @@ class CTridentStreams : public CR16Streams
   {
 public:
    int               stCorner[R16_NSTREAMS];
+   bool              stIsSlide[R16_NSTREAMS];
    int               usedPivCascade[R16_NSTREAMS][R16_NRUNES];
+   int               usedPivSlide[R16_NSTREAMS][R16_NRUNES];
 
                      CTridentStreams(void) : CR16Streams() { ResetAll(); }
 
@@ -39,10 +42,27 @@ public:
       Reset();
       for(int s = 0; s < R16_NSTREAMS; s++)
         {
-         stCorner[s] = TRIDENT_CORNER_NONE;
+         stCorner[s]  = TRIDENT_CORNER_NONE;
+         stIsSlide[s] = false;
          for(int r = 0; r < R16_NRUNES; r++)
+           {
             usedPivCascade[s][r] = -1;
+            usedPivSlide[s][r]   = -1;
+           }
         }
+     }
+
+   //--- Effective Daily ribbon direction (7-EMA stack -> Top-5 -> Top-3 fallback, exact parity with GateDir)
+   int               EffectiveD1Dir(const CR16Market &mkt, int id) const
+     {
+      if(id < 0)
+         return 0;
+      int gd = mkt.d1.stackd[id];
+      if(gd == 0)
+         gd = mkt.d1.StackTop5(id);
+      if(gd == 0)
+         gd = mkt.d1.StackTop3(id);
+      return gd;
      }
 
    //--- Corner #4 Gate: Fast H4 Top-3 + H1 Top-5 Cascade when Corner #2 (16Runes) is OFF
@@ -73,19 +93,40 @@ public:
       return st3_h4;
      }
 
+   //--- Corner #4 Early Inflection Gate: Day-1 Counter-D1 Slide when both 16Runes & H4 Cascade are OFF
+   int               GateDay1SlideDir(int s, const CR16Market &mkt, datetime tc) const
+     {
+      if(s == 1) // Skip H2 stream (2-hour coils lag Day-1 inflection)
+         return 0;
+      int i4 = mkt.h4.LastClosedAt(tc);
+      int i1 = mkt.h1.LastClosedAt(tc);
+      int id = mkt.d1.LastClosedAt(tc);
+      if(i4 < 10 || i1 < 480 || id < 0)
+         return 0;
+
+      int d1e    = EffectiveD1Dir(mkt, id);
+      int st5_h1 = mkt.h1.StackTop5(i1);
+      if(d1e == 0 || st5_h1 != -d1e)
+         return 0;
+
+      return st5_h1;
+     }
+
    //--- Current macro regime label for HUD display
    string            CurrentRegimeSummary(const CR16Market &mkt, datetime srvNow,
                                           bool enableSniper, bool enableRunes, bool enableCascade) const
      {
       int gR_htf = GateDir(0, mkt, srvNow);
       int gC_htf = (gR_htf == 0) ? GateCascadeDir(0, mkt, srvNow) : 0;
+      int gS_htf = (gR_htf == 0 && gC_htf == 0) ? GateDay1SlideDir(0, mkt, srvNow) : 0;
       string s1  = enableSniper ? "P1:SNIPER[ON]" : "P1:SNIPER[OFF]";
       string s2  = (!enableRunes)   ? "P2:16RUNES[DISABLED]"
                    : (gR_htf != 0   ? StringFormat("P2:16RUNES[ACTIVE %s]", gR_htf > 0 ? "BULL" : "BEAR")
                                     : "P2:16RUNES[SLEEP]");
       string s3  = (!enableCascade) ? "P3:CASCADE[DISABLED]"
                    : (gC_htf != 0   ? StringFormat("P3:CASCADE[ACTIVE %s]", gC_htf > 0 ? "BULL" : "BEAR")
-                                    : "P3:CASCADE[SLEEP]");
+                   : (gS_htf != 0   ? StringFormat("P3:CASCADE[SLIDE %s]",  gS_htf > 0 ? "BULL" : "BEAR")
+                                    : "P3:CASCADE[SLEEP]"));
       return s1 + " | " + s2 + " | " + s3;
      }
 
@@ -93,8 +134,9 @@ public:
    void              ArmTrident(int s, const CR16Series &S, const CR16Market &mkt, double bidOpen,
                                 bool enableRunes, bool enableCascade)
      {
-      st[s].armed = false;
-      stCorner[s] = TRIDENT_CORNER_NONE;
+      st[s].armed  = false;
+      stCorner[s]  = TRIDENT_CORNER_NONE;
+      stIsSlide[s] = false;
 
       int p = S.Last();
       if(p < 50)
@@ -107,8 +149,9 @@ public:
       if(piv < 0)
          return;
 
-      int gRunes = GateDir(s, mkt, S.tc[p]);
-      int chosenCorner = TRIDENT_CORNER_NONE;
+      int  gRunes       = GateDir(s, mkt, S.tc[p]);
+      int  chosenCorner = TRIDENT_CORNER_NONE;
+      bool chosenSlide  = false;
 
       if(gRunes != 0)
         {
@@ -119,13 +162,25 @@ public:
         }
       else
         {
-         // Corner #2 is OFF (0/16 Runes): check Corner #4 (ImpulseCascade)
+         // Corner #2 is OFF (0/16 Runes): check Corner #4 (Full Cascade first, then Day-1 Counter-D1 Slide)
          if(!enableCascade)
             return;
          int gCasc = GateCascadeDir(s, mkt, S.tc[p]);
-         if(gCasc == 0 || gCasc != d || piv == usedPivCascade[s][rid])
-            return;
-         chosenCorner = TRIDENT_CORNER_CASCADE;
+         if(gCasc != 0)
+           {
+            if(gCasc != d || piv == usedPivCascade[s][rid])
+               return;
+            chosenCorner = TRIDENT_CORNER_CASCADE;
+            chosenSlide  = false;
+           }
+         else
+           {
+            int gSlide = GateDay1SlideDir(s, mkt, S.tc[p]);
+            if(gSlide == 0 || gSlide != d || piv == usedPivSlide[s][rid])
+               return;
+            chosenCorner = TRIDENT_CORNER_CASCADE;
+            chosenSlide  = true;
+           }
         }
 
       double L = S.trigPx[p];
@@ -158,6 +213,7 @@ public:
       st[s].compRat = S.compRat[p];
       st[s].impVal  = S.impVal[p];
       stCorner[s]   = chosenCorner;
+      stIsSlide[s]  = chosenSlide;
 
       if(S.lastU1Idx >= 0 && S.lastU1Idx < S.n) st[s].u1t = S.t[S.lastU1Idx];
       if(S.lastU2Idx >= 0 && S.lastU2Idx < S.n) st[s].u2t = S.t[S.lastU2Idx];
@@ -177,30 +233,42 @@ public:
       if(newM5)  ArmTrident(4, mkt.m5,  mkt, bidNow, enableRunes, enableCascade);
      }
 
-   bool              CheckBreakTrident(int s, double bid, double ask, int &outDir, double &outTrig, int &outCorner)
+   bool              CheckBreakTrident(int s, double bid, double ask, int &outDir, double &outTrig, int &outCorner, bool &outIsSlide)
      {
       if(!st[s].armed)
          return false;
       if(st[s].dir == 1 && ask >= st[s].level)
         {
-         outDir    = 1;
-         outTrig   = MathMax(ask, st[s].level);
-         outCorner = stCorner[s];
+         outDir      = 1;
+         outTrig     = MathMax(ask, st[s].level);
+         outCorner   = stCorner[s];
+         outIsSlide  = stIsSlide[s];
          st[s].armed = false;
          if(outCorner == TRIDENT_CORNER_CASCADE)
-            usedPivCascade[s][st[s].runeId] = st[s].pivIdx;
+           {
+            if(outIsSlide)
+               usedPivSlide[s][st[s].runeId] = st[s].pivIdx;
+            else
+               usedPivCascade[s][st[s].runeId] = st[s].pivIdx;
+           }
          else
             usedPiv[s][st[s].runeId] = st[s].pivIdx;
          return true;
         }
       if(st[s].dir == -1 && bid <= st[s].level)
         {
-         outDir    = -1;
-         outTrig   = MathMin(bid, st[s].level);
-         outCorner = stCorner[s];
+         outDir      = -1;
+         outTrig     = MathMin(bid, st[s].level);
+         outCorner   = stCorner[s];
+         outIsSlide  = stIsSlide[s];
          st[s].armed = false;
          if(outCorner == TRIDENT_CORNER_CASCADE)
-            usedPivCascade[s][st[s].runeId] = st[s].pivIdx;
+           {
+            if(outIsSlide)
+               usedPivSlide[s][st[s].runeId] = st[s].pivIdx;
+            else
+               usedPivCascade[s][st[s].runeId] = st[s].pivIdx;
+           }
          else
             usedPiv[s][st[s].runeId] = st[s].pivIdx;
          return true;

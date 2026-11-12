@@ -19,12 +19,12 @@
 //+------------------------------------------------------------------+
 #property copyright   "Onix Quantitative Systems — Trident Mixture-of-Experts"
 #property link        "https://www.mql5.com"
-#property version     "1.01"
-#property description "XAUUSD Trident MoE v1.01 — 3-Prong Mixture-of-Experts (Sniper + 16Runes + ImpulseCascade)"
-#property description "3 Embedded Strict-OOS ONNX Models | Hourly AI Regime Router | <3% Daily / <6% Total DD Ceiling"
+#property version     "1.03"
+#property description "XAUUSD Trident MoE v1.03 — 3-Prong Mixture-of-Experts (Sniper + 16Runes + ImpulseCascade)"
+#property description "3 Embedded Strict-OOS ONNX Models | Day-1 Slide + Breathing Harvester | <3% Daily / <6% Total DD Ceiling"
 #property strict
 
-#define TRIDENT_EA_VERSION "1.01"
+#define TRIDENT_EA_VERSION "1.03"
 
 //--- Embed Prong #1 float32[1,12] ONNX Meta-Labeler Binary inside .ex5
 //--- (Prong #2 16runes_meta.onnx & Prong #3 impulse_cascade_meta.onnx are embedded via TridentAiRater.mqh)
@@ -65,8 +65,9 @@ input group "=== [1] UNIFIED RISK MODE & DRAWDOWN PROTECTION ==="
 input ENUM_RISK_MODE InpRiskMode                  = MODE_PROP_GUARD;    // Operating Risk Mode ($50k Prop vs Growth)
 input ENUM_DD_TYPE   InpDrawdownType              = DD_TRAILING_HWM;    // Max Drawdown Reference (Trailing HWM vs Static)
 input double         InpCommissionPerLotRoundTurn = 7.00;               // Round-Turn ECN Commission per Lot (USD)
-input double         InpPropTier2RiskPct          = 1.05;               // Prong #1 Prop Tier-2 Risk % (0.58 <= P < 0.72)
-input double         InpPropTier1RiskPct          = 1.88;               // Prong #1 Prop Tier-1 Risk % (P >= 0.72)
+input double         InpDailyProfitLockPct        = 15.00;              // Unified Daily Realized Profit Lock % (All 3 Prongs)
+input double         InpPropBaseRiskPct           = 1.27;               // Prong #1 Prop Base Risk % ($635 on $50k)
+input double         InpPropHouseMoneyMaxRiskPct  = 2.71;               // Prong #1 Prop House-Money Max Risk %
 input double         InpGrowthTier2RiskPct        = 1.10;               // Prong #1 Growth Tier-2 Risk % (0.58 <= P < 0.72)
 input double         InpGrowthTier1RiskPct        = 1.92;               // Prong #1 Growth Tier-1 Risk % (P >= 0.72)
 input double         InpWaveSoloRiskScale         = 1.00;               // Prong #2/#3 Solo Risk Scale (when Sniper is OFF)
@@ -83,7 +84,8 @@ input double         InpMinSweepAtrRatio          = 0.15;               // Minim
 input double         InpMaxSweepAtrRatio          = 0.65;               // Maximum Liquidity Sweep Depth (x ATR_M15)
 input double         InpMinAbsorptionVolRatio     = 1.50;               // Minimum Tick Volume Absorption (x SMA20)
 input int            InpMaxReclaimBarsM5          = 3;                  // Maximum M5 Bars Allowed for Level Reclaim
-input int            InpLimitExpiryBarsM5         = 3;                  // Pending Sniper Limit Expiry (M5 Bars = 15m)
+input int            InpLimitExpiryBarsM5         = 3;                  // Baseline Pending Sniper Limit Expiry (M5 Bars = 15m)
+input int            InpLowDDLimitExpiryBarsM5    = 6;                  // Low-DD (<1% DDD) Pending Sniper Limit Expiry (M5 Bars = 30m)
 input bool           InpEnableVerticalTimeBarrier = true;               // Enforce 4-Hour Vertical Time Barrier on Sniper Trades
 input int            InpVerticalBarrierHours      = 4;                  // Vertical Time Barrier Duration (Hours)
 
@@ -141,7 +143,7 @@ int                g_drawSeq              = 0;
 //+------------------------------------------------------------------+
 //| Draw detected Prong #2 / Prong #3 pattern lines on chart         |
 //+------------------------------------------------------------------+
-void DrawTridentPattern(int corner, int stream, const SR16Arm &arm)
+void DrawTridentPattern(int corner, int stream, const SR16Arm &arm, bool isSlide = false)
   {
    if(!InpDrawPatterns || (g_tester && !g_visual))
       return;
@@ -177,7 +179,7 @@ void DrawTridentPattern(int corner, int stream, const SR16Arm &arm)
    string nmT = pfx + "LABEL";
    datetime lblT = (arm.u2t > arm.l2t) ? arm.u2t : arm.l2t;
    if(lblT <= 0) lblT = TimeCurrent();
-   string cName = (corner == TRIDENT_CORNER_CASCADE) ? "P3:CAS" : "P2:R16";
+   string cName = (corner == TRIDENT_CORNER_CASCADE) ? (isSlide ? "P3:SLD" : "P3:CAS") : "P2:R16";
    if(ObjectCreate(0, nmT, OBJ_TEXT, 0, lblT, arm.level))
      {
       ObjectSetString(0, nmT, OBJPROP_TEXT,
@@ -275,10 +277,11 @@ int OnInit()
       g_logger.Critical("Trident EquityGuard initialization failed.");
       return INIT_FAILED;
      }
+   g_equityGuard.SetDailyProfitLockPct(InpDailyProfitLockPct);
 
    if(!g_positionSizer.Init(_Symbol, InpRiskMode, InpCommissionPerLotRoundTurn,
                             &g_equityGuard, &g_logger,
-                            InpPropTier2RiskPct, InpPropTier1RiskPct,
+                            InpPropBaseRiskPct, InpPropHouseMoneyMaxRiskPct,
                             InpGrowthTier2RiskPct, InpGrowthTier1RiskPct))
      {
       g_logger.Critical("Trident PositionSizer initialization failed.");
@@ -292,6 +295,7 @@ int OnInit()
       g_logger.Critical("Trident ExecutionManager initialization failed.");
       return INIT_FAILED;
      }
+   g_executionManager.SetLowDDLimitExpiryBarsM5(InpLowDDLimitExpiryBarsM5);
 
    if(!g_sessionLevels.Init(_Symbol, InpBrokerGMTOffsetHours, &g_logger, 0.15, 1.50) ||
       !g_volumeProfile.Init(_Symbol, InpBrokerGMTOffsetHours, &g_logger, InpVPBinSizeUSD,
@@ -321,7 +325,7 @@ int OnInit()
 
    ENUM_R16_MODE waveMode = (InpRiskMode == MODE_PROP_GUARD) ? R16_PROP_FIRM : R16_HOUSE_MONEY_GROWTH;
    g_trRisk.Init(_Symbol, waveMode, InpWaveSoloRiskScale, g_trMkt.m_clk);
-   g_trRisk.ConfigureMoE(InpEnableProng1_Sniper, InpMoEGapFillRiskPct);
+   g_trRisk.ConfigureMoE(InpEnableProng1_Sniper, InpMoEGapFillRiskPct, InpDailyProfitLockPct);
    g_trTrader.Init(_Symbol, (long)InpMagicProng1_Sniper, InpMagicProng2_16Runes,
                    InpMagicProng3_Cascade, InpEnableProng1_Sniper);
 
@@ -473,14 +477,27 @@ void OnTick()
       int     d        = 0;
       double  trigPx   = 0.0;
       int     corner   = TRIDENT_CORNER_NONE;
-      if(!g_trStreams.CheckBreakTrident(s, bid, ask, d, trigPx, corner))
+      bool    isSlide  = false;
+      if(!g_trStreams.CheckBreakTrident(s, bid, ask, d, trigPx, corner, isSlide))
          continue;
 
       // Consume any simultaneous lower-priority breakouts on this exact tick
       for(int q = s + 1; q < R16_NSTREAMS; q++)
         {
-         int dq = 0, cq = 0; double tq = 0.0;
-         g_trStreams.CheckBreakTrident(q, bid, ask, dq, tq, cq);
+         int dq = 0, cq = 0; double tq = 0.0; bool sq = false;
+         g_trStreams.CheckBreakTrident(q, bid, ask, dq, tq, cq, sq);
+        }
+
+      // Healthy-Account Offensive Guard on Day-1 Counter-D1 Slides (protects drawdown recovery years)
+      if(isSlide)
+        {
+         double curDdd = MathMax(rSnap.dailyDrawdownPct, g_trRisk.DailyDdPct());
+         double curTdd = MathMax(rSnap.totalDrawdownPct, g_trRisk.TotalDdPct());
+         if(curTdd >= 2.00 || curDdd >= 1.00)
+           {
+            g_busySkipsWave++;
+            break;
+           }
         }
 
       datetime nowMin = srvNow - (srvNow % 60);
@@ -504,18 +521,21 @@ void OnTick()
          break;
         }
 
+      int    kdNow           = g_trMkt.d1.LastClosedAt(srvNow);
+      int    d1Eff           = g_trStreams.EffectiveD1Dir(g_trMkt, kdNow);
+      bool   isD1Trans       = (corner == TRIDENT_CORNER_16RUNES && kdNow >= 0 && g_trMkt.d1.stackd[kdNow] == 0);
+      bool   isCounterD1Casc = (corner == TRIDENT_CORNER_CASCADE && !isSlide && d1Eff != 0 && d == -d1Eff);
+      double effThr          = g_trAi.Threshold(corner, s, isSlide, isCounterD1Casc) + (isD1Trans ? 0.02 : 0.0);
+
       float  fVec[];
-      double p = g_trAi.ScoreCorner(corner, s, armSnap, g_trMkt, srvNow, fVec);
-      int    kdNow = g_trMkt.d1.LastClosedAt(srvNow);
-      bool   isD1Trans = (corner == TRIDENT_CORNER_16RUNES && kdNow >= 0 && g_trMkt.d1.stackd[kdNow] == 0);
-      double effThr = g_trAi.Threshold(corner, s) + (isD1Trans ? 0.02 : 0.0);
+      double p    = g_trAi.ScoreCorner(corner, s, armSnap, g_trMkt, srvNow, fVec, effThr, isSlide);
+      string pTag = (corner == TRIDENT_CORNER_CASCADE) ? (isSlide ? "P3:SLD" : "P3:CAS") : "P2:R16";
 
       if(InpUseOnnxModel && p >= 0.0 && p < effThr)
         {
          g_vetoesWave++;
          g_lastWaveEventStr = StringFormat("[%s] %s %s p=%.3f VETO",
-                                           corner == TRIDENT_CORNER_CASCADE ? "P3:CAS" : "P2:R16",
-                                           R16_STREAM_NAMES[s], R16_NAMES[armSnap.runeId], p);
+                                           pTag, R16_STREAM_NAMES[s], R16_NAMES[armSnap.runeId], p);
          break;
         }
 
@@ -525,10 +545,9 @@ void OnTick()
       if(g_trTrader.OpenProbe(corner, s, armSnap.runeId, d, h1Atr, convMult, g_trRisk, srvNow))
         {
          g_lastWaveEventStr = StringFormat("[%s] %s %s (%s) p=%.3f OPEN",
-                                           corner == TRIDENT_CORNER_CASCADE ? "P3:CAS" : "P2:R16",
-                                           R16_STREAM_NAMES[s], R16_NAMES[armSnap.runeId],
+                                           pTag, R16_STREAM_NAMES[s], R16_NAMES[armSnap.runeId],
                                            d > 0 ? "BUY" : "SELL", p);
-         DrawTridentPattern(corner, s, armSnap);
+         DrawTridentPattern(corner, s, armSnap, isSlide);
         }
       break;
      }

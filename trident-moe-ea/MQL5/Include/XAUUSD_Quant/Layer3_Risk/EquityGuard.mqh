@@ -40,6 +40,7 @@ private:
    bool               m_enableCalendarFilter;
    double             m_maxSpreadMultiplier;
    double             m_hardMaxSpreadUSD;
+   double             m_dailyProfitLockPct;
 
    CQuantLogger      *m_logger;
    CTrade             m_emergencyTrade;
@@ -381,6 +382,7 @@ public:
       m_enableCalendarFilter    = true;
       m_maxSpreadMultiplier     = 1.80;
       m_hardMaxSpreadUSD        = 0.80;
+      m_dailyProfitLockPct      = PROP_DAILY_PROFIT_LOCK_PCT;
       m_logger                  = NULL;
 
       m_initialBalance          = 0.0;
@@ -450,6 +452,11 @@ public:
             GetTotalBreakerLimitPct()));
         }
       return true;
+     }
+
+   void               SetDailyProfitLockPct(const double pct)
+     {
+      m_dailyProfitLockPct = (pct > 0.0 ? pct : PROP_DAILY_PROFIT_LOCK_PCT);
      }
 
    //--- Daily Drawdown Breaker Limit (%) based on Mode
@@ -659,14 +666,14 @@ public:
                m_logger.WriteRiskStateCSV(snap, note);
               }
            }
-         else if(dailyRealizedPct >= PROP_DAILY_PROFIT_LOCK_PCT)
+         else if(dailyRealizedPct >= m_dailyProfitLockPct)
            {
             m_tradingHaltedToday = true;
             m_activeBreachReason = BREACH_DAILY_PROFIT_TARGET;
             if(m_logger != NULL)
               {
                string note = StringFormat("Prop Guard Daily Profit Lock: Realized +%.2f%% ($%.2f) >= +%.2f%% target.",
-                                          dailyRealizedPct, m_dailyRealizedPnLUSD, PROP_DAILY_PROFIT_LOCK_PCT);
+                                          dailyRealizedPct, m_dailyRealizedPnLUSD, m_dailyProfitLockPct);
                m_logger.Info(note);
                SRiskStateSnapshot snap;
                GetRiskStateSnapshot(snap);

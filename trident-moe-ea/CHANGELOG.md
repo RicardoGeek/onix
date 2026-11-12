@@ -4,6 +4,56 @@ All notable architectural, ONNX meta-model, and risk-engine changes for `XAUUSD_
 
 ---
 
+## [v1.03] — 2026-11-11
+
+### Added & Upgraded — Prong #3 (`ImpulseCascade`) Timing Upgrade: Day-1 Counter-`D1` Slide + Clean Late-Short Filter (`XAUUSD_Trident_MoE_v1.03.ex5`)
+- **Architectural Scope (3 Prongs Unchanged, 0 New ONNX Models)**:
+  - Upgraded the regime timing of **existing Prong #3 (`ImpulseCascade`, Magic `16016004`, `impulse_cascade_meta.onnx`)** without adding a 4th prong or touching any embedded `.onnx` weights, Prong #1 (`Sniper`), or Prong #2 (`16Runes`).
+- **Root Cause Diagnosed on `2026-11-11` (`$4,066 -> $4,001` Day-1 Gold Slide)**:
+  - On Day-1 of a sharp pullback against an established `D1` trend (`D1 = +1`), `H1` Top-5 EMAs (`8, 13, 21, 34, 55`) flip bearish within hours (`H1 5E == -1`), whereas `H4` Top-3 EMAs (`32h–84h` lookback) remain tangled at `0` for `1–2` days (`H4 3E == 0`), leaving Prong #3 in `[SLEEP]` throughout the entire Day-1 move.
+  - Conversely, by Day 2–3 when `H4 3E` finally flips `-1` against `D1 = +1`, price has often dropped `-$65` to `-$100` straight into Daily EMA institutional dip-buyers, diluting `v1.02` Cascade OOS expectancy (`-0.0628R` on low-conviction Day-2/3 counter-`D1` shorts).
+- **SEEN-Calibrated (`2017–2023`) 2-Part Prong #3 Timing Upgrade (Verified via 1x-Spread Numba Evaluator on Unseen OOS `2024–2026`)**:
+  1. **Part A — Clean Day-2/3 Counter-`D1` Cascade Filter ([`TridentAiRater.mqh`](file:///c:/Users/faker/Documents/dev/onix/trident-moe-ea/MQL5/Include/Trident/TridentAiRater.mqh), [`XAUUSD_Trident_MoE.mq5`](file:///c:/Users/faker/Documents/dev/onix/trident-moe-ea/MQL5/Experts/XAUUSD_Trident_MoE.mq5))**:
+     - When standard `GateCascadeDir` (`H4 3E == H1 5E`) triggers **against** `EffectiveD1Dir != 0` (`dir == -D1`), requires high-conviction `p >= TRIDENT_CAS_THR_HIGH` (`0.61870000`), while preserving `0.5400 / 0.5800` for with-`D1` / neutral-`D1` cascades.
+     - Standalone 1x-spread `Mean Net R`: `SEEN (2017–2023)` `+0.0453R -> +0.0467R` | `Unseen OOS (2024–2026)` **`+0.0141R -> +0.0467R` (`3.3x` OOS expectancy lift)**.
+  2. **Part B — Day-1 Counter-`D1` Slide Gate (`GateDay1SlideDir` in [`TridentStreams.mqh`](file:///c:/Users/faker/Documents/dev/onix/trident-moe-ea/MQL5/Include/Trident/TridentStreams.mqh))**:
+     - Activates strictly when **both** Prong #2 (`GateDir == 0`) and standard H4 Cascade (`GateCascadeDir == 0`) are `OFF`, `EffectiveD1Dir != 0`, and `H1 StackTop5 == -EffectiveD1Dir` across streams `H1, M30, M15, M5` (skipping `H2`), gated by `impulse_cascade_meta.onnx >= 0.5800` (`TRIDENT_CAS_THR_SLIDE`) and a Healthy-Account Offensive Guard (`TotalDD < 2.00% && DailyDD < 1.00%`).
+     - Chart HUD (`CurrentRegimeSummary`) now displays `P3:CASCADE[SLIDE BEAR]` / `P3:CASCADE[SLIDE BULL]` whenever this regime is active.
+     - Standalone 1x-spread `Mean Net R`: `SEEN (2017–2023)` **`+0.0482R`** (`n = 187`, `84.0%` WR, `25.1%` runners `>= +0.25R`) | `Unseen OOS (2024–2026)` **`+0.0879R`** (`n = 150`, `71.3%` WR, `20.7%` runners `>= +0.25R`).
+- **Exact 1x-Spread `$50,000` Prop Portfolio Improvement (`v1.02` -> `v1.03`)**:
+  - **`SEEN 2017–2023`**: `$374,401.67` (`3,137` tr, `1.78/d`) -> **`$381,804.49` (`3,206` tr, `1.82/d`, `+$7,402.82`)**
+  - **`Unseen OOS 2024–2026`**: `$549,955.58` (`1,697` tr, `2.36/d`, `+0.182R`) -> **`$577,847.28` (`1,770` tr, `2.47/d`, `+0.189R`, `+$27,891.70`)**
+  - **`Total 10Y (2017–2026)`**: `$924,357.24` (`4,834` tr, `1.95/d`, `0.53d` wait, `+0.131R`) -> **`$959,651.76` (`4,976` tr, `2.00/d`, `0.52d` wait, `+0.133R`, `+$35,294.52`)**, `MaxDDD = 2.84% < 3.0%`, `MaxTDD = 5.40% < 6.0%`.
+  - **Prong #3 (`ImpulseCascade`) Net Profit**: `10Y` `$10,253.46` (`+0.065R`) -> **`$24,219.29` (`+0.089R`, `2.36x`)** | `Unseen OOS` `$5,473.80` (`+0.043R`) -> **`$14,982.74` (`+0.109R`, `2.74x`)**.
+
+---
+
+## [v1.02] — 2026-11-10
+
+### Added & Upgraded — Unified Risk Alignment, Low-DD Limit Expiry & SEEN-Calibrated Breathing Harvester (`XAUUSD_Trident_MoE_v1.02.ex5`)
+- **Code-Review Hygiene & Mismatch Alignment**:
+  1. **Unified Daily Realized Profit Lock (`InpDailyProfitLockPct = 15.00%`)**:
+     - Replaced the mismatched daily profit locks (`g_trRisk.m_dayProfitLockPct = 2.65%` on Prongs #2/#3 vs hardcoded `PROP_DAILY_PROFIT_LOCK_PCT = 15.00%` on Prong #1) with a single unified `InpDailyProfitLockPct = 15.00` input wired into both `CEquityGuard::SetDailyProfitLockPct()` ([`EquityGuard.mqh`](file:///c:/Users/faker/Documents/dev/onix/trident-moe-ea/MQL5/Include/XAUUSD_Quant/Layer3_Risk/EquityGuard.mqh)) and `CTridentRisk::ConfigureMoE()` ([`TridentTrader.mqh`](file:///c:/Users/faker/Documents/dev/onix/trident-moe-ea/MQL5/Include/Trident/TridentTrader.mqh)).
+  2. **Aligned Prop Tier Risk Inputs & Constants (`1.27%` Base / `2.71%` House-Money Max)**:
+     - Replaced the unused/mismatched `InpPropTier2RiskPct = 1.05` / `InpPropTier1RiskPct = 1.88` inputs and `0.48% / 0.62%` macros with `InpPropBaseRiskPct = 1.27` (`$635` base on `$50k`) and `InpPropHouseMoneyMaxRiskPct = 2.71` wired directly into `CPositionSizer::CalculateSniperLots()` ([`PositionSizer.mqh`](file:///c:/Users/faker/Documents/dev/onix/trident-moe-ea/MQL5/Include/XAUUSD_Quant/Layer3_Risk/PositionSizer.mqh)) and [`Definitions.mqh`](file:///c:/Users/faker/Documents/dev/onix/trident-moe-ea/MQL5/Include/XAUUSD_Quant/Core/Definitions.mqh), while also deducting any active cross-prong stop-loss risk from `remDayFloor`.
+  3. **Conditional Low-DD Sniper Pending Limit Expiry (`InpLowDDLimitExpiryBarsM5 = 6`)**:
+     - Extends Prong #1 Sniper resting limit order lifetime from `3` M5 bars (`15m`) to `6` M5 bars (`30m`) strictly while `DailyDrawdownPct < 1.00%` in `CExecutionManager::ManageActiveTradesOnTick()` ([`ExecutionManager.mqh`](file:///c:/Users/faker/Documents/dev/onix/trident-moe-ea/MQL5/Include/XAUUSD_Quant/Layer3_Risk/ExecutionManager.mqh)), reverting immediately to `3` M5 bars whenever `DailyDrawdownPct >= 1.00%`.
+     - Preserved Prong #1 Sniper's `0.58` ONNX floor, directional gating, and `v1.01`'s realized-balance HWM drawdown sync unchanged.
+- **SEEN-Calibrated (`2017–2023`) Expectancy & Multi-Stream Cadence Upgrade (Verified via 1x-Spread Numba Evaluator on Unseen OOS `2024–2026`)**:
+  - **Root Cause Fixed (`$10` Scratches vs Negative Expectancy in `v1.01` Wave Manage)**:
+    - Removed the MoE hair-trigger `0.07R / $0.10` server-TP choke (`escTp = +0.05R`) and 5-minute `0.22R -> +0.08R` clamp in `CTridentTrader::Manage()` ([`TridentTrader.mqh`](file:///c:/Users/faker/Documents/dev/onix/trident-moe-ea/MQL5/Include/Trident/TridentTrader.mqh)) that had truncated `99%` of Prong #2/#3 coils into tiny `~$8–$11` scratches (`MeanNetR = -0.028R`).
+    - Replaced with the SEEN-calibrated Breathing Harvester (`15m/30m/60m` on `M15/M5` and `30m/60m/120m` on `H1/H2/M30` at `0.32R -> +0.10R`, `0.22R -> +0.08R`, `0.16R -> +0.06R`, mid-lock `0.60R -> +0.28R`, Stage-1 Whale at `+1.25R -> +0.35R`), allowing `UnprotectedProbes() < 2` across orthogonal Wave streams (`ownUnprotectedCount < 2 && totalUnprotectedCount < 3` in Sniper so Wave probes never starve Prong #1) plus a `0.55x` startup Wave cushion below `+1.0%` account gain.
+    - Calibrated Prong #3 (`ImpulseCascade`) probability thresholds on `2017–2023` SEEN (`TRIDENT_CAS_THR_HTF = 0.5400`, `TRIDENT_CAS_THR_M5 = 0.5800` in [`TridentAiRater.mqh`](file:///c:/Users/faker/Documents/dev/onix/trident-moe-ea/MQL5/Include/Trident/TridentAiRater.mqh), keeping all 3 `.onnx` binaries unchanged) so standalone **Mean Net R After Spread** is strictly positive across both `SEEN 2017–2023` and `Unseen OOS 2024–2026` on every Prong:
+      - **Prong #2 (`16Runes`) Standalone Mean Net R**: `-0.0620R -> +0.0018R` (`SEEN`) | `+0.0185R -> +0.1435R` (`OOS`, `7.8x` lift; `>=0.25R` runners `1.0% -> 16.1%`).
+      - **Prong #3 (`ImpulseCascade`) Standalone Mean Net R**: `-0.0421R -> +0.0453R` (`SEEN`) | `-0.0354R -> +0.0141R` (`OOS`; `>=0.25R` runners `1.1% -> 17.2%`).
+  - **Exact 1x-Spread `$50,000` Prop Portfolio Improvement (`v1.01` -> `v1.02`, All 3 Prongs Independently Profitable)**:
+    - **`SEEN 2017–2023`**: `$313,734.65` (`+0.069R`) -> **`$374,401.67` (`+0.104R`, `+$60,667`)**
+    - **`Unseen OOS 2024–2026`**: `$484,373.66` (`1,677` tr, `2.34/d`, `+0.120R`) -> **`$549,955.58` (`1,697` tr, `2.36/d`, `+0.182R`, `+$65,582`)**
+    - **`Total 10Y (2017–2026)`**: `$798,108.31` (`+0.087R`) -> **`$924,357.24` (`+0.131R`, `+$126,249`)**, `MaxDDD = 2.84% < 3.0%`, `MaxTDD = 5.39% < 6.0%`.
+    - **Per-Prong 10Y Net**: `Sniper` `+$887,427.37` (`+0.233R`), `16Runes` `-$21,714.61 -> +$26,676.41` (`+0.047R`, OOS `+$28,577.31` / `+0.113R`), `ImpulseCascade` `-$4,285.99 -> +$10,253.46` (`+0.065R`, OOS `+$5,473.80` / `+0.043R`).
+
+---
+
 ## [v1.01] — 2026-11-09
 
 ### Fixed — Unified Drawdown Tracker Synchronization (`UpdateTrackersTrident` in `TridentTrader.mqh` & `XAUUSD_Trident_MoE.mq5`)

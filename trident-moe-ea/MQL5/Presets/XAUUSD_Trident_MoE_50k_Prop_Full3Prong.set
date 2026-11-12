@@ -1,4 +1,4 @@
-; XAUUSD_Trident_MoE v1.00 Institutional Preset
+; XAUUSD_Trident_MoE v1.03 Institutional Preset
 InpEnableProng1_Sniper=true
 InpEnableProng2_16Runes=true
 InpEnableProng3_Cascade=true
@@ -9,8 +9,9 @@ InpMagicProng3_Cascade=16016004
 InpRiskMode=0
 InpDrawdownType=0
 InpCommissionPerLotRoundTurn=7.00
-InpPropTier2RiskPct=1.05
-InpPropTier1RiskPct=1.88
+InpDailyProfitLockPct=15.00
+InpPropBaseRiskPct=1.27
+InpPropHouseMoneyMaxRiskPct=2.71
 InpGrowthTier2RiskPct=1.10
 InpGrowthTier1RiskPct=1.92
 InpWaveSoloRiskScale=1.00
@@ -24,6 +25,7 @@ InpMaxSweepAtrRatio=0.65
 InpMinAbsorptionVolRatio=1.50
 InpMaxReclaimBarsM5=3
 InpLimitExpiryBarsM5=3
+InpLowDDLimitExpiryBarsM5=6
 InpEnableVerticalTimeBarrier=true
 InpVerticalBarrierHours=4
 InpEnableCalendarFilter=true
